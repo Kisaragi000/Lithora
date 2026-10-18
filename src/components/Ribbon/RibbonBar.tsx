@@ -76,6 +76,7 @@ interface RibbonBarProps {
   onToggleOutline: () => void;
   isVirtualKeyboardOpen: boolean;
   onToggleVirtualKeyboard: () => void;
+  onFixEncoding?: () => void;
 }
 
 export const RibbonBar: React.FC<RibbonBarProps> = ({
@@ -108,6 +109,7 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   onToggleOutline,
   isVirtualKeyboardOpen,
   onToggleVirtualKeyboard,
+  onFixEncoding,
 }) => {
   const t = translations[currentLang];
   const [activeRibbonTab, setActiveRibbonTab] = useState<'home' | 'insert' | 'layout' | 'review' | 'cloud' | 'file' | 'export'>('home');
@@ -767,6 +769,17 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
               <Type className="w-4 h-4 text-purple-600" />
               <span>{t.armenianKeyboard} / RU</span>
             </button>
+
+            {onFixEncoding && (
+              <button
+                onClick={onFixEncoding}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-amber-50 text-amber-800 border border-amber-300 bg-amber-50/50 transition-colors font-medium"
+                title="Decode Windows-1251 Cyrillic mojibake (ÂÈÇ... -> ВИЗОВАЯ...)"
+              >
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <span>Fix Russian Encoding (CP1251)</span>
+              </button>
+            )}
           </div>
         )}
 

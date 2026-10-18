@@ -13,7 +13,7 @@ import {
   sampleArmenianDoc,
   sampleRussianDoc,
 } from './data/sampleDocuments';
-import { parseRtfToHtml, serializeHtmlToRtf } from './services/rtfParser';
+import { parseRtfToHtml, serializeHtmlToRtf, fixCyrillicMojibake } from './services/rtfParser';
 import { parseDocxToHtml, generateDocxBlob } from './services/docxService';
 import {
   loadPersistedDocuments,
@@ -234,6 +234,16 @@ export default function App() {
     await handleExport(activeDoc.format);
   };
 
+  // Repair Cyrillic / Windows-1251 mojibake (e.g. ÂÈÇÎÂÀß -> ВИЗОВАЯ)
+  const handleFixEncoding = () => {
+    if (!activeDoc) return;
+    const repaired = fixCyrillicMojibake(activeDoc.content);
+    handleContentChange(repaired);
+    if (editorRef.current) {
+      editorRef.current.innerHTML = repaired;
+    }
+  };
+
   // Title change
   const handleTitleChange = (newTitle: string) => {
     setDocuments((prev) =>
@@ -380,20 +390,42 @@ export default function App() {
         } else if (extension === 'rtf') {
           format = 'rtf';
           const buffer = await file.arrayBuffer();
-          // Try UTF-8 first
-          let text = new TextDecoder('utf-8').decode(buffer);
-          // If RTF specifies Windows-1251 Cyrillic codepage, decode with windows-1251
-          if (text.includes('ansicpg1251') || text.includes('deflang1049')) {
+          const uint8 = new Uint8Array(buffer);
+
+          // Read initial ASCII header to inspect RTF codepage and font declarations
+          let headerAscii = '';
+          const headerLen = Math.min(uint8.length, 4096);
+          for (let b = 0; b < headerLen; b++) {
+            headerAscii += String.fromCharCode(uint8[b]);
+          }
+
+          const hasCyrillicHints =
+            headerAscii.includes('1251') ||
+            headerAscii.includes('1049') ||
+            headerAscii.includes('charset204') ||
+            headerAscii.includes('Cyr') ||
+            /\\\'[c-fC-F][0-9a-fA-F]/.test(headerAscii);
+
+          let text = '';
+          if (hasCyrillicHints) {
             try {
               text = new TextDecoder('windows-1251').decode(buffer);
             } catch {
-              // fallback to utf-8 text
+              text = new TextDecoder('utf-8').decode(buffer);
+            }
+          } else {
+            try {
+              text = new TextDecoder('utf-8').decode(buffer);
+            } catch {
+              text = new TextDecoder('windows-1251').decode(buffer);
             }
           }
+
           content = parseRtfToHtml(text);
         } else {
           // Check if file content begins with {\rtf
-          const text = await file.text();
+          const buffer = await file.arrayBuffer();
+          const text = new TextDecoder('utf-8').decode(buffer);
           if (text.trim().toLowerCase().startsWith('{\\rtf')) {
             format = 'rtf';
             content = parseRtfToHtml(text);
@@ -408,6 +440,8 @@ export default function App() {
               .join('');
           }
         }
+
+        content = fixCyrillicMojibake(content);
 
         newDocs.push({
           id: `doc_imported_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -739,6 +773,7 @@ ${activeDoc.content}
         onToggleOutline={() => setIsOutlineOpen(!isOutlineOpen)}
         isVirtualKeyboardOpen={isVirtualKeyboardOpen}
         onToggleVirtualKeyboard={() => setIsVirtualKeyboardOpen(!isVirtualKeyboardOpen)}
+        onFixEncoding={handleFixEncoding}
       />
 
       {/* Find and Replace bar */}
@@ -757,6 +792,24 @@ ${activeDoc.content}
         onInsertChar={(char) => executeCommand('insertHTML', char)}
         currentLang={currentLang}
       />
+
+      {/* Cyrillic Mojibake Auto-Detection Banner */}
+      {/[À-ÿ]{3,}/.test(activeDoc.content) && (
+        <div className="bg-amber-100 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 z-20 shadow-xs animate-in slide-in-from-top-1">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-amber-800">⚠️ Encoding Notice:</span>
+            <span>
+              This document contains Windows-1251 Cyrillic text displayed as Latin characters (e.g. <code>ÂÈÇÎÂÀß...</code>).
+            </span>
+          </div>
+          <button
+            onClick={handleFixEncoding}
+            className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded shadow-xs transition-colors shrink-0 ml-2"
+          >
+            Decode to Russian (ВИЗОВАЯ...)
+          </button>
+        </div>
+      )}
 
       {/* Optional Document Ruler */}
       {activeDoc.pageSettings.showRuler && (
