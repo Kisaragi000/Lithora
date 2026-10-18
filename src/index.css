@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Document Sheet and Editor Styles */
+.document-editor-canvas:focus {
+  outline: none;
+}
+
+.document-editor-canvas {
+  font-family: 'Calibri', 'Plus Jakarta Sans', 'Noto Sans Armenian', 'Sylfaen', sans-serif;
+  color: #1e293b;
+  min-height: 100%;
+}
+
+.document-editor-canvas p {
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+
+.document-editor-canvas h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: #0f172a;
+}
+
+.document-editor-canvas h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: #1e293b;
+}
+
+.document-editor-canvas h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 0.875rem;
+  margin-bottom: 0.5rem;
+  color: #334155;
+}
+
+.document-editor-canvas ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.document-editor-canvas ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.document-editor-canvas blockquote {
+  border-left: 3px solid #94a3b8;
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-right: 0;
+  font-style: italic;
+  color: #475569;
+}
+
+.document-editor-canvas table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.document-editor-canvas table,
+.document-editor-canvas th,
+.document-editor-canvas td {
+  border: 1px solid #cbd5e1;
+}
+
+.document-editor-canvas th {
+  background-color: #f8fafc;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.document-editor-canvas td {
+  padding: 0.5rem 0.75rem;
+}
+
+.document-editor-canvas hr {
+  border: none;
+  border-top: 1px solid #cbd5e1;
+  margin: 1.5rem 0;
+}
+
+.document-editor-canvas img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: inline-block;
+  margin: 0.5rem 0;
+}
+
+/* Armenian typography class */
+.font-armenian {
+  font-family: 'Noto Sans Armenian', 'Sylfaen', 'Arial AMU', sans-serif;
+}
+
+.font-armenian-serif {
+  font-family: 'Noto Serif Armenian', 'Sylfaen', serif;
+}
+
+/* Print styling for PDF export */
+@media print {
+  body {
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: auto !important;
+    padding: 20mm !important;
+  }
+}
