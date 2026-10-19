@@ -1,4 +1,15 @@
 mod engine;
+mod title_bar;
+
+use tauri::Manager;
+
+/// Reads a file dropped onto the window, so the editor can open it.
+#[tauri::command]
+fn read_dropped_file(path: String) -> Result<tauri::ipc::Response, String> {
+    std::fs::read(&path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|e| format!("{path}: {e}"))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,8 +26,12 @@ pub fn run() {
             engine::engine_command,
             engine::engine_save_as,
             engine::startup_file,
+            read_dropped_file,
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                title_bar::apply(&window);
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

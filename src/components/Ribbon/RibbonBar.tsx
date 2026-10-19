@@ -21,9 +21,6 @@ import {
   Minus,
   Calendar,
   Sparkles,
-  Cloud,
-  CloudUpload,
-  CloudCheck,
   Download,
   RotateCcw,
   Search,
@@ -43,7 +40,7 @@ import {
   Columns2,
   Columns3,
 } from 'lucide-react';
-import { Language, PageSettings, CloudSnapshot, DocumentFormat } from '../../types/document';
+import { Language, PageSettings, DocumentFormat } from '../../types/document';
 import { translations } from '../../i18n/translations';
 import { GoogleFontsModal } from '../Modals/GoogleFontsModal';
 import { loadGoogleFont } from '../../services/googleFontsService';
@@ -65,15 +62,6 @@ interface RibbonBarProps {
   onLoadSample: (type: 'en' | 'hy' | 'ru' | 'fonts' | 'proofread') => void;
   onSave: () => void;
   onPrint: () => void;
-  // Cloud Sync
-  cloudSnapshots: CloudSnapshot[];
-  onSaveSnapshot: (label: string) => void;
-  onRestoreSnapshot: (snapshot: CloudSnapshot) => void;
-  onDeleteSnapshot: (id: string) => void;
-  onExportCloudBackup: () => void;
-  onImportCloudBackup: () => void;
-  onManualSync: () => void;
-  isSyncing: boolean;
   // Review & Search
   isFindReplaceOpen: boolean;
   onToggleFindReplace: () => void;
@@ -108,14 +96,6 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   onLoadSample,
   onSave,
   onPrint,
-  cloudSnapshots,
-  onSaveSnapshot,
-  onRestoreSnapshot,
-  onDeleteSnapshot,
-  onExportCloudBackup,
-  onImportCloudBackup,
-  onManualSync,
-  isSyncing,
   isFindReplaceOpen,
   onToggleFindReplace,
   isOutlineOpen,
@@ -132,8 +112,7 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   onClearProofread,
 }) => {
   const t = translations[currentLang];
-  const [activeRibbonTab, setActiveRibbonTab] = useState<'home' | 'insert' | 'layout' | 'review' | 'cloud' | 'file' | 'export'>('home');
-  const [snapshotNameInput, setSnapshotNameInput] = useState('');
+  const [activeRibbonTab, setActiveRibbonTab] = useState<'home' | 'insert' | 'layout' | 'review' | 'file' | 'export'>('home');
   const [fontColor, setFontColor] = useState('#0f172a');
   const [hiliteColor, setHiliteColor] = useState('#fef08a');
   const [selectedFont, setSelectedFont] = useState('Calibri');
@@ -176,12 +155,6 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   const handleFontSizeChange = (val: string) => {
     setSelectedFontSize(val);
     onCommand('fontSize', val);
-  };
-
-  const handleCreateSnapshot = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSaveSnapshot(snapshotNameInput.trim() || `Snapshot ${new Date().toLocaleTimeString()}`);
-    setSnapshotNameInput('');
   };
 
   const insertCurrentDateTime = () => {
@@ -257,18 +230,6 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveRibbonTab('cloud')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-t transition-colors ${
-            activeRibbonTab === 'cloud'
-              ? 'bg-white text-blue-700 border-t border-x border-slate-300 -mb-px'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <Cloud className="w-3.5 h-3.5" />
-          <span>{t.tabCloud}</span>
-        </button>
-
-        <button
           onClick={() => setActiveRibbonTab('export')}
           className={`flex items-center gap-1 px-3 py-1.5 rounded-t transition-colors ${
             activeRibbonTab === 'export'
@@ -337,7 +298,7 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
             <button
               onClick={onSave}
               className="flex flex-col items-center gap-1 p-2 hover:bg-slate-100 rounded-md text-slate-700 transition-colors"
-              title="Save snapshot to cloud"
+              title="Save changes"
             >
               <Save className="w-4 h-4 text-emerald-600" />
               <span>{t.saveNow}</span>
@@ -1007,61 +968,6 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
                 <span>Clear Highlights</span>
               </button>
             )}
-          </div>
-        )}
-
-        {/* CLOUD & SYNC TAB PANEL */}
-        {activeRibbonTab === 'cloud' && (
-          <div className="flex items-center gap-4 text-xs w-full justify-between">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={onManualSync}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-md shadow-xs transition-colors shrink-0"
-              >
-                {isSyncing ? (
-                  <CloudUpload className="w-4 h-4 animate-bounce" />
-                ) : (
-                  <CloudCheck className="w-4 h-4" />
-                )}
-                <span>{isSyncing ? t.syncing : t.syncNow}</span>
-              </button>
-
-              {/* Create Snapshot Form */}
-              <form onSubmit={handleCreateSnapshot} className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  placeholder={t.snapshotName}
-                  value={snapshotNameInput}
-                  onChange={(e) => setSnapshotNameInput(e.target.value)}
-                  className="px-2.5 py-1 text-xs border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500 w-48 sm:w-60"
-                />
-                <button
-                  type="submit"
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium transition-colors"
-                >
-                  {t.createSnapshot}
-                </button>
-              </form>
-            </div>
-
-            {/* Cloud Backup Export/Import */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={onExportCloudBackup}
-                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
-                title={t.exportCloudBackup}
-              >
-                Backup (.json)
-              </button>
-              <button
-                onClick={onImportCloudBackup}
-                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors"
-                title={t.importCloudBackup}
-              >
-                Restore Backup
-              </button>
-            </div>
           </div>
         )}
 

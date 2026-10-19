@@ -25,6 +25,7 @@ export interface Translations {
   // File Menu
   openFiles: string;
   openFilesDesc: string;
+  dropToOpen: string;
   saveNow: string;
   saveAs: string;
   exportDocument: string;
@@ -176,6 +177,7 @@ export const translations: Record<Language, Translations> = {
 
     openFiles: 'Open Documents',
     openFilesDesc: 'Open .docx, .rtf, .html, .txt files (batch multiple files supported)',
+    dropToOpen: 'Drop to open',
     saveNow: 'Save Changes',
     saveAs: 'Save As...',
     exportDocument: 'Export Document',
@@ -318,6 +320,7 @@ export const translations: Record<Language, Translations> = {
 
     openFiles: 'Открыть документы',
     openFilesDesc: 'Открытие файлов .docx, .rtf, .html, .txt (поддержка пакета файлов)',
+    dropToOpen: 'Отпустите, чтобы открыть',
     saveNow: 'Сохранить изменения',
     saveAs: 'Сохранить как...',
     exportDocument: 'Экспортировать документ',
@@ -460,6 +463,7 @@ export const translations: Record<Language, Translations> = {
 
     openFiles: 'Բացել փաստաթղթեր',
     openFilesDesc: 'Բացել .docx, .rtf, .html, .txt ֆայլեր (միաժամանակ մի քանի ֆայլ)',
+    dropToOpen: 'Բաց թողեք՝ բացելու համար',
     saveNow: 'Պահպանել փոփոխությունները',
     saveAs: 'Պահպանել որպես...',
     exportDocument: 'Արտահանել փաստաթուղթը',

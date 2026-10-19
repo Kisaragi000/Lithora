@@ -2235,7 +2235,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "lithora"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "log",
  "serde",
@@ -2245,6 +2245,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
+ "windows-sys 0.61.2",
  "wordcraft-engine",
 ]
 
