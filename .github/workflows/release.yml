@@ -1,18 +1,47 @@
 name: Release
 
-# Builds the Windows and Linux installers and attaches them to a draft
-# GitHub release. Run it by pushing a tag like v0.2.0, or by hand from the
-# Actions tab.
+# Every merge to main that carries a new version number (package.json)
+# builds the Windows and Linux installers and publishes them as a GitHub
+# release, which the in-app "Check for updates" button then offers.
+# Merges that keep the version of an already published release do nothing.
+# It can also be run by hand from the Actions tab.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(jq -r .version package.json)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          draft=$(gh release view "$tag" --repo "${{ github.repository }}" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          if [ "$draft" = "false" ]; then
+            echo "$tag is already published; nothing to do."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -48,27 +77,34 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: npm run tauri
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: Lithora ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseName: Lithora ${{ needs.check.outputs.tag }}
           releaseBody: |
             Download the installer for your system below.
             Windows: Lithora_*_x64-setup.exe. Linux: the .deb (Ubuntu, Debian, Mint), the .rpm (Fedora, openSUSE) or the .AppImage (any distribution). Nothing else needs to be installed.
+          # Stays a draft until both installers are attached; the publish job
+          # below makes it public.
           releaseDraft: true
-          prerelease: true
+          prerelease: false
 
       # Lithora's "Check for updates" compares its download against these.
       - name: Attach checksums
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd src-tauri/target/release/bundle
           name="SHA256SUMS-${{ runner.os }}.txt"
           find . -type f \( -name '*-setup.exe' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print0 \
             | xargs -0 sha256sum | sed -E 's#^([0-9a-f]+) [ *]\./(.*/)?#\1  #' > "$name"
           cat "$name"
-          curl -sSf -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: text/plain" \
-            --data-binary @"$name" \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$name" > /dev/null
+          gh release upload "${{ needs.check.outputs.tag }}" "$name" --clobber --repo "${{ github.repository }}"
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.check.outputs.tag }}" --draft=false --latest --repo "${{ github.repository }}"

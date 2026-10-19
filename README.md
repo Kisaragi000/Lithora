@@ -67,8 +67,11 @@ To build a Windows installer from Linux, install `nsis` and `mingw-w64`, add the
 with `rustup target add x86_64-pc-windows-gnu`, then run
 `npm run tauri build -- --target x86_64-pc-windows-gnu --bundles nsis`.
 
-Pushing a tag such as `v0.2.0` runs the Release workflow in GitHub Actions, which builds the
-Windows and Linux installers and attaches them to a draft release.
+To release a new version, raise the version number (package.json, package-lock.json,
+src-tauri/tauri.conf.json, src-tauri/Cargo.toml) and merge to `main`. The Release workflow in
+GitHub Actions then builds the Windows and Linux installers and publishes them as a GitHub
+release, and the app's "Check for updates" button offers it. Merges that keep the version
+number of an already published release don't build anything.
 
 ## Project layout
 
