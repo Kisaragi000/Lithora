@@ -1,9 +1,30 @@
 import { DocumentTab, CloudSnapshot } from '../types/document';
 
-const STORAGE_KEY_DOCS = 'wordcraft_active_documents_v1';
-const STORAGE_KEY_SNAPSHOTS = 'wordcraft_cloud_snapshots_v1';
-const STORAGE_KEY_ACTIVE_TAB = 'wordcraft_active_tab_id';
-const STORAGE_KEY_SETTINGS = 'wordcraft_app_settings';
+const STORAGE_KEY_DOCS = 'lithora_active_documents_v1';
+const STORAGE_KEY_SNAPSHOTS = 'lithora_cloud_snapshots_v1';
+const STORAGE_KEY_ACTIVE_TAB = 'lithora_active_tab_id';
+const STORAGE_KEY_SETTINGS = 'lithora_app_settings';
+
+// Older builds saved under 'wordcraft_*' keys. Move that data to the new keys once,
+// so people who used an earlier version keep their open documents and snapshots.
+function migrateLegacyStorageKeys(): void {
+  try {
+    for (const key of [STORAGE_KEY_DOCS, STORAGE_KEY_SNAPSHOTS, STORAGE_KEY_ACTIVE_TAB, STORAGE_KEY_SETTINGS]) {
+      const legacyKey = key.replace(/^lithora_/, 'wordcraft_');
+      const legacyValue = localStorage.getItem(legacyKey);
+      if (legacyValue !== null) {
+        if (localStorage.getItem(key) === null) {
+          localStorage.setItem(key, legacyValue);
+        }
+        localStorage.removeItem(legacyKey);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to migrate legacy storage keys:', e);
+  }
+}
+
+migrateLegacyStorageKeys();
 
 export interface CloudSyncState {
   roomId: string;
