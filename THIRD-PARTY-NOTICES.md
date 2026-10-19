@@ -6,6 +6,8 @@ Lithora includes the following third-party software. Each keeps its own license.
 
 Lithora's document engine is built on the Rust crates of WordCraft
 (https://github.com/storytold/wordcraft).
+Lithora ships a modified copy of its `wordcraft-formats` crate in
+`src-tauri/vendor/wordcraft-formats` (changes listed in its README).
 
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option. See

@@ -1,5 +1,6 @@
 mod engine;
 mod title_bar;
+mod updater;
 
 use tauri::Manager;
 
@@ -22,6 +23,9 @@ pub fn run() {
             engine::engine_save,
             engine::engine_fonts,
             engine::startup_files,
+            updater::check_update,
+            updater::install_update,
+            updater::open_releases_page,
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
