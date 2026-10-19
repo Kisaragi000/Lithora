@@ -1,5 +1,6 @@
 /** The ribbon: Lithora's formatting and page commands, run by the engine. */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlignCenter,
   AlignJustify,
@@ -103,6 +104,64 @@ function Divider() {
   return <span className="mx-1.5 h-6 w-px shrink-0 bg-slate-200" />;
 }
 
+/**
+ * A floating panel under `anchor`, drawn on top of everything. It lives outside the ribbon
+ * because the ribbon row scrolls sideways, which would clip anything hanging below it.
+ */
+function FloatingPanel({
+  anchor,
+  onClose,
+  children,
+  className = '',
+}: {
+  anchor: HTMLElement;
+  onClose(): void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number }>(() => place(anchor, 0));
+  useLayoutEffect(() => {
+    const update = () => setPos(place(anchor, panel.current?.offsetWidth ?? 0));
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [anchor]);
+  useEffect(() => {
+    const away = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!panel.current?.contains(target) && !anchor.contains(target)) onClose();
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('mousedown', away);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [anchor, onClose]);
+  return createPortal(
+    <div
+      ref={panel}
+      className={`fixed z-[100] overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl ${className}`}
+      style={{ left: pos.left, top: pos.top, maxHeight: pos.maxHeight }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** Where a panel of `width` goes under `anchor`, kept inside the window. */
+function place(anchor: HTMLElement, width: number) {
+  const r = anchor.getBoundingClientRect();
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+  const top = r.bottom + 4;
+  return { left, top, maxHeight: Math.max(120, window.innerHeight - top - 8) };
+}
+
 /** A button that opens a small panel below it. */
 function Popover({
   title,
@@ -116,35 +175,200 @@ function Popover({
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener('mousedown', away);
-    return () => window.removeEventListener('mousedown', away);
-  }, [open]);
+  const button = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
   return (
-    <div ref={box} className="relative">
+    <>
       <button
+        ref={button}
         type="button"
-        title={title}
+        title={open ? undefined : title}
         aria-label={title}
         aria-expanded={open}
         disabled={disabled}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-8 items-center gap-0.5 rounded-md px-1.5 text-[13px] text-slate-700 hover:bg-[#6C9FCB]/15 hover:text-[#083B69] disabled:pointer-events-none disabled:opacity-35"
+        className={`inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-[13px] text-slate-700 hover:bg-[#6C9FCB]/15 hover:text-[#083B69] disabled:pointer-events-none disabled:opacity-35 ${
+          open ? 'bg-[#6C9FCB]/15 text-[#083B69]' : ''
+        }`}
       >
         {label}
         <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
-      {open && (
-        <div className="absolute left-0 top-9 z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-lg" onMouseDown={(e) => e.preventDefault()}>
-          {children(() => setOpen(false))}
-        </div>
+      {open && button.current && (
+        <FloatingPanel anchor={button.current} onClose={close}>
+          <div onMouseDown={(e) => e.preventDefault()}>{children(close)}</div>
+        </FloatingPanel>
       )}
+    </>
+  );
+}
+
+/** Fonts most documents use, shown first. Missing ones are drawn with a matching free font. */
+const COMMON_FONTS = [
+  'Calibri',
+  'Arial',
+  'Times New Roman',
+  'Cambria',
+  'Aptos',
+  'Georgia',
+  'Verdana',
+  'Tahoma',
+  'Segoe UI',
+  'Courier New',
+  'Garamond',
+  'Book Antiqua',
+];
+
+/** CSS fallbacks so a font's preview still looks close when it isn't installed. */
+const PREVIEW_FALLBACK: Record<string, string> = {
+  Calibri: "'Carlito', sans-serif",
+  Cambria: "'Caladea', serif",
+  Arial: "'Liberation Sans', 'Arimo', sans-serif",
+  'Times New Roman': "'Liberation Serif', 'Tinos', serif",
+  'Courier New': "'Liberation Mono', 'Cousine', monospace",
+  Georgia: "'Gelasio', serif",
+  Garamond: "'EB Garamond', serif",
+  'Book Antiqua': "'Palatino Linotype', 'TeX Gyre Pagella', serif",
+};
+
+const previewFamily = (name: string) => `'${name.replace(/'/g, "\\'")}', ${PREVIEW_FALLBACK[name] ?? 'sans-serif'}`;
+
+/** The font box: each font in the list is shown in its own typeface, common ones first. */
+function FontPicker({
+  t,
+  value,
+  fonts,
+  disabled,
+  onPick,
+}: {
+  t: Strings;
+  value: string;
+  fonts: string[];
+  disabled?: boolean;
+  onPick(name: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const button = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+  }, []);
+  const q = query.trim().toLowerCase();
+  const match = (name: string) => !q || name.toLowerCase().includes(q);
+  const installed = new Set(fonts);
+  const common = COMMON_FONTS.filter(match);
+  const all = fonts.filter(match);
+  const pick = (name: string) => {
+    onPick(name);
+    close();
+  };
+  const row = (name: string, key: string) => (
+    <button
+      key={key}
+      type="button"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => pick(name)}
+      title={installed.has(name) ? name : `${name} (${t.fontSubstituted})`}
+      className={`block w-full truncate rounded px-2 py-1 text-left text-[15px] leading-6 hover:bg-[#6C9FCB]/15 ${
+        name === value ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-800'
+      }`}
+      style={{ fontFamily: previewFamily(name) }}
+    >
+      {name}
+    </button>
+  );
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        title={open ? undefined : t.font}
+        aria-label={t.font}
+        aria-expanded={open}
+        disabled={disabled}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="inline-flex h-8 w-44 shrink-0 items-center justify-between gap-1 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 hover:border-[#6C9FCB] disabled:opacity-35"
+      >
+        <span className="truncate" style={value ? { fontFamily: previewFamily(value) } : undefined}>
+          {value || '—'}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && button.current && (
+        <FloatingPanel anchor={button.current} onClose={close} className="w-72 p-1.5">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const first = common[0] ?? all[0];
+                if (first) pick(first);
+              }
+            }}
+            placeholder={t.searchFonts}
+            className="mb-1.5 h-8 w-full rounded-md border border-slate-300 px-2 text-[13px] focus:border-[#376FA3] focus:outline-none"
+          />
+          {common.length > 0 && (
+            <>
+              <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#376FA3]">{t.commonFonts}</div>
+              {common.map((name) => row(name, `c-${name}`))}
+              <div className="my-1.5 h-px bg-slate-200" />
+            </>
+          )}
+          <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#376FA3]">{t.allFonts}</div>
+          {all.map((name) => row(name, `a-${name}`))}
+        </FloatingPanel>
+      )}
+    </>
+  );
+}
+
+/** Page setups applied in one click: size, orientation, margins (points) and columns. */
+interface LayoutPreset {
+  id: keyof Strings;
+  size: string;
+  landscape: boolean;
+  margins: { top: number; bottom: number; left: number; right: number };
+  columns: number;
+}
+
+const mm = (v: number) => Math.round((v * 72 * 100) / 25.4) / 100;
+const inch = (v: number) => v * 72;
+
+const LAYOUT_PRESETS: LayoutPreset[] = [
+  { id: 'presetStandard', size: 'A4', landscape: false, margins: { top: inch(1), bottom: inch(1), left: inch(1), right: inch(1) }, columns: 1 },
+  { id: 'presetLetter', size: 'Letter', landscape: false, margins: { top: inch(1), bottom: inch(1), left: inch(1), right: inch(1) }, columns: 1 },
+  { id: 'presetOfficial', size: 'A4', landscape: false, margins: { top: mm(20), bottom: mm(20), left: mm(30), right: mm(15) }, columns: 1 },
+  { id: 'presetNarrow', size: 'A4', landscape: false, margins: { top: inch(0.5), bottom: inch(0.5), left: inch(0.5), right: inch(0.5) }, columns: 1 },
+  { id: 'presetWide', size: 'A4', landscape: false, margins: { top: inch(1), bottom: inch(1), left: inch(2), right: inch(2) }, columns: 1 },
+  { id: 'presetLandscape', size: 'A4', landscape: true, margins: { top: inch(1), bottom: inch(1), left: inch(1), right: inch(1) }, columns: 1 },
+  { id: 'presetTwoColumns', size: 'A4', landscape: false, margins: { top: inch(0.75), bottom: inch(0.75), left: inch(0.75), right: inch(0.75) }, columns: 2 },
+  { id: 'presetBooklet', size: 'A5', landscape: false, margins: { top: mm(15), bottom: mm(15), left: mm(15), right: mm(15) }, columns: 1 },
+];
+
+/** A small drawing of a preset's page: its shape, margins and columns. */
+function PresetThumb({ p }: { p: LayoutPreset }) {
+  const [w, h] = p.size === 'Letter' ? [612, 792] : p.size === 'A5' ? [420, 595] : [595, 842];
+  const [pw, ph] = p.landscape ? [h, w] : [w, h];
+  const scale = 40 / Math.max(pw, ph);
+  const m = p.margins;
+  const cols = Array.from({ length: p.columns });
+  return (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center">
+      <div className="relative border border-slate-400 bg-white" style={{ width: pw * scale, height: ph * scale }}>
+        <div
+          className="absolute flex gap-[2px]"
+          style={{ left: m.left * scale, right: m.right * scale, top: m.top * scale, bottom: m.bottom * scale }}
+        >
+          {cols.map((_, i) => (
+            <div key={i} className="flex-1 bg-[repeating-linear-gradient(#6C9FCB_0_1px,transparent_1px_3px)] opacity-70" />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -253,29 +477,14 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
               <Copy className="h-4 w-4" />
             </Btn>
             <Divider />
-            <select
-              title={t.font}
-              aria-label={t.font}
-              disabled={none}
-              value={fontValue}
-              onChange={(e) => onCommand('format.font', { name: e.target.value })}
-              className="h-8 w-44 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 focus:border-[#376FA3] focus:outline-none"
-              style={{ fontFamily: fontValue || undefined }}
-            >
-              {!fontValue && <option value="" />}
-              {fontOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            <FontPicker t={t} value={fontValue} fonts={fontOptions} disabled={none} onPick={(name) => onCommand('format.font', { name })} />
             <select
               title={t.fontSize}
               aria-label={t.fontSize}
               disabled={none}
               value={f?.size ?? ''}
               onChange={(e) => onCommand('format.size', { size: Number(e.target.value) })}
-              className="ml-1 h-8 w-16 rounded-md border border-slate-300 bg-white px-1.5 text-[13px] text-slate-800 focus:border-[#376FA3] focus:outline-none"
+              className="ml-1 h-8 w-16 shrink-0 rounded-md border border-slate-300 bg-white px-1.5 text-[13px] text-slate-800 focus:border-[#376FA3] focus:outline-none"
             >
               {f?.size == null && <option value="" />}
               {(f?.size != null && !SIZES.includes(f.size) ? [f.size, ...SIZES] : SIZES).map((size) => (
@@ -443,6 +652,33 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
 
         {tab === 'layout' && (
           <>
+            <Popover title={t.presets} disabled={none} label={<span className="px-1 font-medium text-[#083B69]">{t.presets}</span>}>
+              {(close) => (
+                <div className="grid w-[420px] grid-cols-2 gap-1">
+                  {LAYOUT_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        onCommand('layout.size', { name: p.size });
+                        onCommand('layout.orientation', { value: p.landscape ? 'landscape' : 'portrait' });
+                        onCommand('layout.margins', p.margins);
+                        onCommand('layout.columns', { count: p.columns, apply: 'document' });
+                        close();
+                      }}
+                      className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-[#6C9FCB]/15"
+                    >
+                      <PresetThumb p={p} />
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-medium text-slate-800">{t[p.id]}</span>
+                        <span className="block text-[11px] text-slate-500">{t[`${p.id}Hint` as keyof Strings]}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <Divider />
             <Popover title={t.margins} disabled={none} label={<span className="px-1">{t.margins}</span>}>
               {(close) => (
                 <div className="flex w-36 flex-col">
@@ -450,6 +686,7 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
                     [
                       ['normal', t.marginsNormal],
                       ['narrow', t.marginsNarrow],
+                      ['moderate', t.marginsModerate],
                       ['wide', t.marginsWide],
                     ] as const
                   ).map(([preset, label]) => (
