@@ -12,6 +12,20 @@
 > **Status: early development.** Lithora is not ready for everyday work yet. Expect missing
 > features and rough edges.
 
+## Install
+
+Download the installer from the [Releases](https://github.com/Kisaragi000/Lithora/releases) page:
+
+- **Windows 10/11:** `Lithora_<version>_x64-setup.exe`. It installs for your user only, so it
+  does not need administrator rights. Windows SmartScreen may warn that the publisher is
+  unknown, because the installer is not code-signed yet; choose *More info*, then *Run anyway*.
+- **Linux:** the `.deb` (Ubuntu, Debian, Mint), the `.rpm` (Fedora, openSUSE) or the
+  `.AppImage` (any distribution; make it executable and run it).
+
+Lithora uses [LibreOffice](https://www.libreoffice.org/download/) to lay out and edit pages,
+so install LibreOffice too. In the app, press **Ctrl+Shift+E** to switch to the LibreOffice
+engine view.
+
 ## Features today
 
 - Opens .docx, .rtf, .doc (Word 97-2003), .odt and Word XML files.
@@ -25,9 +39,8 @@
 ## Roadmap
 
 Lithora keeps its React interface and runs as a native desktop app with
-[Tauri](https://tauri.app). File handling, PDF export and spellchecking will move to Rust,
-reusing parts of [WordCraft](https://github.com/storytold/wordcraft) (MIT OR Apache-2.0)
-for higher fidelity with Word documents.
+[Tauri](https://tauri.app). LibreOffice (through LibreOfficeKit) lays out, draws and saves
+documents, so Word files keep their columns, spacing and placement.
 
 ## Getting started
 
@@ -46,6 +59,13 @@ npm run tauri build   # build installers for your platform (output in src-tauri/
 npm run dev           # or run in a browser at http://localhost:3000
 npm run lint          # typecheck
 ```
+
+To build a Windows installer from Linux, install `nsis` and `mingw-w64`, add the Rust target
+with `rustup target add x86_64-pc-windows-gnu`, then run
+`npm run tauri build -- --target x86_64-pc-windows-gnu --bundles nsis`.
+
+Pushing a tag such as `v0.2.0` runs the Release workflow in GitHub Actions, which builds the
+Windows and Linux installers and attaches them to a draft release.
 
 ## Project layout
 
