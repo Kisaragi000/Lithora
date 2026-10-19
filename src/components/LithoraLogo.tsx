@@ -1,0 +1,60 @@
+import React from 'react';
+
+interface LithoraLogoProps {
+  className?: string;
+  size?: number;
+}
+
+export const LithoraLogo: React.FC<LithoraLogoProps> = ({ className = 'w-7 h-7', size }) => {
+  const style = size ? { width: size, height: (size * 800) / 600 } : undefined;
+
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 600 800"
+      className={className}
+      style={style}
+      fill="none"
+      aria-label="Lithora Logo"
+    >
+      <defs>
+        <clipPath id="lithoraShapeComponent">
+          <polygon points="160,40 440,40 565,165 565,635 440,760 160,760 35,635 35,165" />
+        </clipPath>
+      </defs>
+
+      <g clip-path="url(#lithoraShapeComponent)">
+        {/* Deep Navy Base Body */}
+        <rect width="600" height="800" fill="#0c3c6e" />
+
+        {/* Top Left Corner Chamfer/Fold */}
+        <polygon points="160,40 35,165 160,165" fill="#467eb8" />
+        {/* Top Right Corner Chamfer/Fold */}
+        <polygon points="440,40 565,165 440,165" fill="#699ed8" />
+
+        {/* Left Upper Triangular Facet */}
+        <polygon points="35,165 160,165 35,500" fill="#366ea9" />
+        {/* Left Lower Triangular Facet */}
+        <polygon points="35,500 160,635 35,635" fill="#245892" />
+        {/* Bottom Left Corner Chamfer/Fold */}
+        <polygon points="160,760 35,635 160,635" fill="#2e649e" />
+
+        {/* Right Upper Triangular Facet */}
+        <polygon points="565,165 440,165 565,500" fill="#4c85c4" />
+        {/* Right Lower Triangular Facet */}
+        <polygon points="565,500 440,635 565,635" fill="#3069a5" />
+        {/* Bottom Right Corner Chamfer/Fold */}
+        <polygon points="440,760 565,635 440,635" fill="#3a74b2" />
+
+        {/* Center Deep Sapphire Face */}
+        <polygon points="160,40 440,40 440,165 565,500 440,635 440,760 160,760 160,635 35,500 160,165" fill="#0a396c" />
+
+        {/* 4 White Document Content Bars */}
+        <rect x="155" y="285" width="290" height="42" rx="2" fill="#ffffff" />
+        <rect x="155" y="369" width="290" height="42" rx="2" fill="#ffffff" />
+        <rect x="155" y="453" width="290" height="42" rx="2" fill="#ffffff" />
+        <rect x="155" y="537" width="290" height="42" rx="2" fill="#ffffff" />
+      </g>
+    </svg>
+  );
+};

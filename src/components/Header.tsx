@@ -12,9 +12,12 @@ import {
   Columns,
   Square,
   ArrowDownToLine,
+  Sparkles,
 } from 'lucide-react';
 import { Language, CloudSyncStatus, DocumentFormat } from '../types/document';
 import { translations } from '../i18n/translations';
+import { LithoraLogo } from './LithoraLogo';
+import { ProofreadLanguage } from '../services/localProofreaderService';
 
 interface HeaderProps {
   currentLang: Language;
@@ -31,6 +34,12 @@ interface HeaderProps {
   onPrint: () => void;
   isSplitView: boolean;
   onToggleSplitView: () => void;
+  // AI Proofreading
+  onProofread?: () => void;
+  isProofreading?: boolean;
+  proofreadCount?: number;
+  hasActiveProofreadMarks?: boolean;
+  proofreadLanguage?: ProofreadLanguage;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +57,11 @@ export const Header: React.FC<HeaderProps> = ({
   onPrint,
   isSplitView,
   onToggleSplitView,
+  onProofread,
+  isProofreading = false,
+  proofreadCount = 0,
+  hasActiveProofreadMarks = false,
+  proofreadLanguage = 'auto',
 }) => {
   const t = translations[currentLang];
 
@@ -87,13 +101,16 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="flex items-center justify-between gap-4 px-4 py-2.5 bg-white border-b border-slate-200 select-none">
       {/* Zone 1: Brand & Document Title */}
       <div className="flex items-center gap-3 min-w-0">
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-sm">
-            <FileText className="w-5 h-5" />
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-slate-900/5 p-0.5 flex items-center justify-center shadow-xs border border-slate-200/80 hover:scale-105 transition-transform">
+            <LithoraLogo className="w-6 h-6 drop-shadow-xs" />
           </div>
           <div className="hidden sm:block">
-            <span className="text-base font-bold tracking-tight text-slate-900 leading-none">
-              WordCraft
+            <span
+              className="text-[17px] tracking-tight text-slate-900 leading-none flex items-center gap-1.5"
+              style={{ fontFamily: "'Sora', sans-serif", fontWeight: 600 }}
+            >
+              Lithora
             </span>
           </div>
         </div>
@@ -197,6 +214,33 @@ export const Header: React.FC<HeaderProps> = ({
           <Download className="w-3.5 h-3.5" />
           <span>{t.tabExport}</span>
         </button>
+
+        {/* AI Proofreading CTA next to Export */}
+        {onProofread && (
+          <button
+            onClick={onProofread}
+            disabled={isProofreading}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border shadow-xs transition-all ${
+              hasActiveProofreadMarks
+                ? 'bg-purple-100 text-purple-900 border-purple-300 hover:bg-purple-200'
+                : 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100 hover:border-purple-300'
+            }`}
+            title="Auto-proofread EN, RU, and ARM text with local AI and mark suggested changes in lavender"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-purple-600 ${isProofreading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">AI Proofread</span>
+            <span className="sm:hidden">Proofread</span>
+            {proofreadCount !== undefined && proofreadCount > 0 ? (
+              <span className="px-1.5 py-0.2 text-[10px] bg-purple-600 text-white font-bold rounded-full">
+                {proofreadCount}
+              </span>
+            ) : (
+              <span className="text-[10px] font-medium text-purple-600/80 hidden lg:inline">
+                EN·RU·ARM
+              </span>
+            )}
+          </button>
+        )}
 
         <div className="h-5 w-px bg-slate-200 mx-1" />
 

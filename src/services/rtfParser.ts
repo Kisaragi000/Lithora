@@ -1,151 +1,179 @@
 /**
- * WordCraft Enterprise RTF Parser and Serializer
+ * Lithora Enterprise RTF Parser and Serializer
  * 
  * Supports:
  * 1. Complete group & destination stripping for Microsoft Word metadata
- *    ({\*...}, {\fonttbl...}, {\colortbl...}, {\stylesheet...}, {\info...}, etc.)
- * 2. 100% accurate Windows-1251 Cyrillic decoding for hex escapes (\'hh) and raw bytes
- * 3. Automatic Cyrillic mojibake repair (ÂÈÇÎÂÀß -> ВИЗОВАЯ, ²íôîðìàöè ÿ -> Інформація)
- * 4. Full Unicode support (\uN? with signed 16-bit integer conversion) for Armenian & Russian
- * 5. Complete Table parsing (\trowd, \intbl, \cell, \row)
- * 6. Clean semantic HTML chunking (prevents per-character tag wrapping)
- * 7. Rich typography: bold, italic, underline, strikethrough, alignment, font sizes, headings
+ * 2. 100% accurate \fonttbl parsing and font preservation
+ * 3. \colortbl parsing with foreground text color (\cfN) and highlight background (\highlightN / \cbN)
+ * 4. Multi-column layouts (\colsN, \colsxN, \column)
+ * 5. Exact line spacing (\slN, \slmultN), space before (\sbN), space after (\saN)
+ * 6. Paragraph indents (\liN, \riN, \fiN) and alignments (\ql, \qc, \qr, \qj)
+ * 7. Tables with exact column boundaries (\cellxN), borders, and cell shading (\clcbpatN)
+ * 8. Divider lines (\brdrb) and page breaks (\page)
+ * 9. Cyrillic Windows-1251 and Armenian Unicode characters
+ * 10. Bidirectional serialization back to RTF
  */
 
-// Full Windows-1251 mapping table for bytes 0x80..0xFF
-export const CP1251_TABLE: Record<number, string> = {
-  0x80: '\u0402', // Ђ
-  0x81: '\u0403', // Ѓ
-  0x82: '\u201A', // ‚
-  0x83: '\u0453', // ѓ
-  0x84: '\u201E', // „
-  0x85: '\u2026', // …
-  0x86: '\u2020', // †
-  0x87: '\u2021', // ‡
-  0x88: '\u20AC', // €
-  0x89: '\u2030', // ‰
-  0x8A: '\u0409', // Љ
-  0x8B: '\u2039', // ‹
-  0x8C: '\u040A', // Њ
-  0x8D: '\u040C', // Ќ
-  0x8E: '\u040B', // Ћ
-  0x8F: '\u040F', // Џ
-  0x90: '\u0452', // ђ
-  0x91: '\u2018', // ‘
-  0x92: '\u2019', // ’
-  0x93: '\u201C', // “
-  0x94: '\u201D', // ”
-  0x95: '\u2022', // •
-  0x96: '\u2013', // –
-  0x97: '\u2014', // —
-  0x98: '\u0098', // (unassigned)
-  0x99: '\u2122', // ™
-  0x9A: '\u0459', // љ
-  0x9B: '\u203A', // ›
-  0x9C: '\u045A', // њ
-  0x9D: '\u045C', // ќ
-  0x9E: '\u045B', // ћ
-  0x9F: '\u045F', // џ
-  0xA0: '\u00A0', // &nbsp;
-  0xA1: '\u040E', // Ў
-  0xA2: '\u045E', // ў
-  0xA3: '\u0408', // Ј
-  0xA4: '\u00A4', // ¤
-  0xA5: '\u0490', // Ґ
-  0xA6: '\u00A6', // ¦
-  0xA7: '\u00A7', // §
-  0xA8: '\u0401', // Ё
-  0xA9: '\u00A9', // ©
-  0xAA: '\u0404', // Є
-  0xAB: '\u00AB', // «
-  0xAC: '\u00AC', // ¬
-  0xAD: '\u00AD', // soft hyphen
-  0xAE: '\u00AE', // ®
-  0xAF: '\u0407', // Ї
-  0xB0: '\u00B0', // °
-  0xB1: '\u00B1', // ±
-  0xB2: '\u0406', // І (Ukrainian)
-  0xB3: '\u0456', // і (Ukrainian)
-  0xB4: '\u0491', // ґ
-  0xB5: '\u00B5', // µ
-  0xB6: '\u00B6', // ¶
-  0xB7: '\u00B7', // ·
-  0xB8: '\u0451', // ё
-  0xB9: '\u2116', // №
-  0xBA: '\u0454', // є
-  0xBB: '\u00BB', // »
-  0xBC: '\u0458', // ј
-  0xBD: '\u0405', // Ѕ
-  0xBE: '\u0455', // ѕ
-  0xBF: '\u0457', // ї
+// Cyrillic Windows-1251 to UTF-8 lookup table for 0x80 to 0xFF
+const CP1251_MAP: Record<number, string> = {
+  0x80: '\u0402', 0x81: '\u0403', 0x82: '\u201A', 0x83: '\u0453',
+  0x84: '\u201E', 0x85: '\u2026', 0x86: '\u2020', 0x87: '\u2021',
+  0x88: '\u20AC', 0x89: '\u2030', 0x8A: '\u0409', 0x8B: '\u2039',
+  0x8C: '\u040A', 0x8D: '\u040C', 0x8E: '\u040B', 0x8F: '\u040F',
+  0x90: '\u0452', 0x91: '\u2018', 0x92: '\u2019', 0x93: '\u201C',
+  0x94: '\u201D', 0x95: '\u2022', 0x96: '\u2013', 0x97: '\u2014',
+  0x98: '',       0x99: '\u2122', 0x9A: '\u0459', 0x9B: '\u203A',
+  0x9C: '\u045A', 0x9D: '\u045C', 0x9E: '\u045B', 0x9F: '\u045F',
+  0xA0: '\u00A0', 0xA1: '\u040E', 0xA2: '\u045E', 0xA3: '\u0408',
+  0xA4: '\u00A4', 0xA5: '\u0490', 0xA6: '\u00A6', 0xA7: '\u00A7',
+  0xA8: '\u0401', 0xA9: '\u00A9', 0xAA: '\u0404', 0xAB: '\u00AB',
+  0xAC: '\u00AC', 0xAD: '\u00AD', 0xAE: '\u00AE', 0xAF: '\u0407',
+  0xB0: '\u00B0', 0xB1: '\u00B1', 0xB2: '\u0406', 0xB3: '\u0456',
+  0xB4: '\u0491', 0xB5: '\u00B5', 0xB6: '\u00B6', 0xB7: '\u00B7',
+  0xB8: '\u0451', 0xB9: '\u2116', 0xBA: '\u0454', 0xBB: '\u00BB',
+  0xBC: '\u0458', 0xBD: '\u0405', 0xBE: '\u0455', 0xBF: '\u0457',
 };
 
-export function decodeCp1251Byte(b: number): string {
-  // Russian Cyrillic uppercase and lowercase: 0xC0..0xFF -> U+0410..U+044F
-  if (b >= 0xC0 && b <= 0xFF) {
-    return String.fromCharCode(b + 0x350);
-  }
-  if (CP1251_TABLE[b]) {
-    return CP1251_TABLE[b];
-  }
-  return String.fromCharCode(b);
+// Fill Russian alphabet 0xC0..0xFF (А..я)
+for (let b = 0xc0; b <= 0xff; b++) {
+  CP1251_MAP[b] = String.fromCharCode(0x0410 + (b - 0xc0));
 }
 
-/**
- * Repairs Windows-1251 Cyrillic mojibake where CP1251 bytes were incorrectly
- * read as ISO-8859-1 (Latin-1).
- * Example: "ÂÈÇÎÂÀß À ÍÊÅÒÀ" -> "ВИЗОВАЯ АНКЕТА"
- * Example: "²íôîðìàöè ÿ" -> "Інформація"
- * Example: "Ô.È.Î: Äåâè÷üÿ" -> "Ф.И.О: Девичья"
- */
-export function fixCyrillicMojibake(htmlOrText: string): string {
-  if (!htmlOrText) return htmlOrText;
+export function decodeCp1251Byte(byteVal: number): string {
+  if (byteVal < 128) return String.fromCharCode(byteVal);
+  return CP1251_MAP[byteVal] || String.fromCharCode(byteVal);
+}
 
-  // Process text outside HTML tags and HTML entities
-  return htmlOrText.replace(/([^<>&;]+)/g, (segment) => {
-    // If the segment contains Latin-1 accented characters that match CP1251 mojibake:
-    if (/[À-ÿ\u0080-\u00BF]/.test(segment)) {
-      let converted = '';
-      for (let i = 0; i < segment.length; i++) {
-        const code = segment.charCodeAt(i);
-        if (code >= 0x80 && code <= 0xFF) {
-          converted += decodeCp1251Byte(code);
-        } else {
-          converted += segment[i];
-        }
-      }
-      return converted;
+export function fixCyrillicMojibake(str: string): string {
+  if (!str) return str;
+  return str.replace(/[À-ÿ]/g, (char) => {
+    const code = char.charCodeAt(0);
+    if (code >= 0xc0 && code <= 0xff) {
+      return String.fromCharCode(0x0410 + (code - 0xc0));
     }
-    return segment;
+    return char;
   });
 }
 
-/**
- * Checks if a string has Cyrillic hints (e.g. ansicpg1251, deflang1049, fcharset204, or high Cyrillic hex escapes)
- */
-function detectIsCyrillicRtf(rtf: string): boolean {
+export function detectIsCyrillicRtf(rtf: string): boolean {
+  const header = rtf.slice(0, 4096);
   return (
-    rtf.includes('ansicpg1251') ||
-    rtf.includes('deflang1049') ||
-    rtf.includes('lang1049') ||
-    rtf.includes('fcharset204') ||
-    rtf.includes('Times New Roman Cyr') ||
-    rtf.includes('Arial Cyr') ||
-    rtf.includes('Courier New Cyr') ||
-    /\\\'[c-fC-F][0-9a-fA-F]/.test(rtf)
+    header.includes('1251') ||
+    header.includes('1049') ||
+    header.includes('charset204') ||
+    header.includes('\\deflang1049') ||
+    header.includes('Cyr') ||
+    /\\\'[c-fC-F][0-9a-fA-F]/.test(header)
   );
+}
+
+/**
+ * Extracts the complete font table mapping from RTF
+ */
+export function extractRtfFontTable(rtf: string): Map<number, string> {
+  const fontMap = new Map<number, string>();
+  const match = rtf.match(/\\fonttbl\s*(\{[\s\S]*?\})(?=\s*\\(?:colortbl|stylesheet|info|\*|[a-z]))/);
+
+  let fontTblContent = '';
+  if (match) {
+    fontTblContent = match[1];
+  } else {
+    const startIdx = rtf.indexOf('\\fonttbl');
+    if (startIdx !== -1) {
+      let depth = 0;
+      let foundStart = false;
+      let endIdx = startIdx;
+      for (let p = startIdx; p < Math.min(rtf.length, startIdx + 8192); p++) {
+        if (rtf[p] === '{') {
+          depth++;
+          foundStart = true;
+        } else if (rtf[p] === '}') {
+          depth--;
+          if (foundStart && depth === 0) {
+            endIdx = p;
+            break;
+          }
+        }
+      }
+      if (endIdx > startIdx) {
+        fontTblContent = rtf.slice(startIdx, endIdx + 1);
+      }
+    }
+  }
+
+  if (!fontTblContent) return fontMap;
+
+  const segments = fontTblContent.split(/(?=\{\\f|\{\s*\\f)/g);
+  for (const seg of segments) {
+    const idMatch = seg.match(/\\f(\d+)/);
+    if (!idMatch) continue;
+    const fontId = parseInt(idMatch[1], 10);
+
+    const withSpace = seg.replace(/\\{[^{}]*\\}/g, ' ');
+    const noControl = withSpace.replace(/\\[a-zA-Z]+(-?\d+)? ?/g, ' ');
+    const fontName = noControl.replace(/[;{}]/g, '').replace(/\s+/g, ' ').trim();
+
+    if (fontName && !fontName.startsWith('@')) {
+      fontMap.set(fontId, fontName);
+    }
+  }
+
+  return fontMap;
+}
+
+export function extractRtfFonts(rtf: string): string[] {
+  const fontMap = extractRtfFontTable(rtf);
+  return Array.from(new Set(fontMap.values()));
+}
+
+/**
+ * Extracts color table from RTF ({\colortbl;\red0\green0\blue0;...})
+ */
+export function extractRtfColorTable(rtf: string): string[] {
+  const colors: string[] = ['auto'];
+  const match = rtf.match(/\{\\colortbl([^}]+)\}/);
+  if (!match) return colors;
+
+  const parts = match[1].split(';');
+  for (const p of parts) {
+    const red = p.match(/\\red(\d+)/);
+    const green = p.match(/\\green(\d+)/);
+    const blue = p.match(/\\blue(\d+)/);
+    if (red && green && blue) {
+      colors.push(`rgb(${red[1]}, ${green[1]}, ${blue[1]})`);
+    } else {
+      colors.push('auto');
+    }
+  }
+  return colors;
 }
 
 interface StyleState {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  doubleUnderline: boolean;
+  dottedUnderline: boolean;
   strike: boolean;
-  fontSize: number; // in pt (half-points / 2)
+  superscript: boolean;
+  subscript: boolean;
+  fontSize: number; // in pt
   align: 'left' | 'center' | 'right' | 'justify';
   isDestination: boolean;
   inTable: boolean;
-  uc: number; // number of chars to skip after \uN
+  uc: number;
+  fontFamily?: string;
+  color?: string;
+  highlight?: string;
+  lineSpacing?: number; // e.g. 1.5, 2.0
+  spaceBefore?: number; // pt
+  spaceAfter?: number; // pt
+  leftIndent?: number; // pt
+  rightIndent?: number; // pt
+  firstLineIndent?: number; // pt
+  hasBottomBorder?: boolean;
+  columns?: number;
+  columnGap?: number;
 }
 
 interface TextChunk {
@@ -153,15 +181,26 @@ interface TextChunk {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  doubleUnderline?: boolean;
+  dottedUnderline?: boolean;
   strike: boolean;
+  superscript?: boolean;
+  subscript?: boolean;
+  fontFamily?: string;
+  fontSize?: number;
+  color?: string;
+  highlight?: string;
 }
 
 interface TableCell {
   chunks: TextChunk[];
+  widthPercent?: number;
+  bgColor?: string;
 }
 
 interface TableRow {
   cells: TableCell[];
+  cellX: number[];
 }
 
 function renderChunksToHtml(chunks: TextChunk[]): string {
@@ -169,70 +208,123 @@ function renderChunksToHtml(chunks: TextChunk[]): string {
   for (const chunk of chunks) {
     if (!chunk.text) continue;
     let piece = escapeHtml(chunk.text);
+
     if (chunk.bold) piece = `<strong>${piece}</strong>`;
     if (chunk.italic) piece = `<em>${piece}</em>`;
-    if (chunk.underline) piece = `<u>${piece}</u>`;
+    if (chunk.underline) {
+      if (chunk.doubleUnderline) piece = `<u style="text-decoration-style: double;">${piece}</u>`;
+      else if (chunk.dottedUnderline) piece = `<u style="text-decoration-style: dotted;">${piece}</u>`;
+      else piece = `<u>${piece}</u>`;
+    }
     if (chunk.strike) piece = `<s>${piece}</s>`;
+    if (chunk.superscript) piece = `<sup>${piece}</sup>`;
+    if (chunk.subscript) piece = `<sub>${piece}</sub>`;
+
+    const spanStyles: string[] = [];
+    if (chunk.fontFamily) spanStyles.push(`font-family: '${escapeHtml(chunk.fontFamily)}'`);
+    if (chunk.fontSize && chunk.fontSize !== 12) spanStyles.push(`font-size: ${chunk.fontSize}pt`);
+    if (chunk.color && chunk.color !== 'auto') spanStyles.push(`color: ${chunk.color}`);
+    if (chunk.highlight && chunk.highlight !== 'auto') spanStyles.push(`background-color: ${chunk.highlight}`);
+
+    if (spanStyles.length > 0) {
+      piece = `<span style="${spanStyles.join('; ')}">${piece}</span>`;
+    }
     result += piece;
   }
   return result;
 }
 
+export interface RtfParseResult {
+  html: string;
+  fonts: string[];
+}
+
 /**
- * Parses RTF text into clean semantic HTML with table, styling, and multi-language support.
+ * Parses RTF text preserving columns, line spacing, margins, indents, borders, tables, and colors.
  */
-export function parseRtfToHtml(rawRtf: string): string {
+export function parseRtfWithFonts(rawRtf: string): RtfParseResult {
   if (!rawRtf || !rawRtf.trim()) {
-    return '<p>Empty document</p>';
+    return { html: '<p>Empty document</p>', fonts: [] };
   }
 
-  let text = rawRtf.replace(/^\uFEFF/, '').trim();
+  const text = rawRtf.replace(/^\uFEFF/, '').trim();
 
   // If text is not RTF, treat as plain text paragraphs
   if (!text.toLowerCase().includes('{\\rtf')) {
     const lines = text.split('\n');
     const paras = lines
-      .map((l) => `<p>${escapeHtml(l) || '&nbsp;'}</p>`)
+      .map((l) => `<p style="margin-bottom: 8px; line-height: 1.4;">${escapeHtml(l) || '&nbsp;'}</p>`)
       .join('');
-    return fixCyrillicMojibake(paras);
+    return { html: fixCyrillicMojibake(paras), fonts: [] };
   }
 
   const isCyrillic = detectIsCyrillicRtf(rawRtf);
+  const fontTable = extractRtfFontTable(rawRtf);
+  const colorTable = extractRtfColorTable(rawRtf);
+  const usedFonts = new Set<string>();
 
-  // Group stack
+  const defaultFont = fontTable.get(0);
+  if (defaultFont) usedFonts.add(defaultFont);
+
   const stateStack: StyleState[] = [];
   let current: StyleState = {
     bold: false,
     italic: false,
     underline: false,
+    doubleUnderline: false,
+    dottedUnderline: false,
     strike: false,
+    superscript: false,
+    subscript: false,
     fontSize: 12,
     align: 'left',
     isDestination: false,
     inTable: false,
     uc: 1,
+    fontFamily: defaultFont,
+    lineSpacing: 1.4,
+    columns: 1,
+    columnGap: 24,
   };
 
   const paragraphs: string[] = [];
   let currentChunks: TextChunk[] = [];
 
-  // Table building
+  // Table state
   let currentTableRows: TableRow[] = [];
   let currentRowCells: TableCell[] = [];
   let currentCellChunks: TextChunk[] = [];
+  let currentCellX: number[] = [];
+  let currentCellBgColor: string | undefined = undefined;
   let inTableMode = false;
+
+  // Multi-column tracking
+  let activeColumnCount = 1;
+  let columnBuffer: string[] = [];
 
   const appendText = (str: string) => {
     if (!str) return;
     const targetChunks = inTableMode ? currentCellChunks : currentChunks;
     const last = targetChunks[targetChunks.length - 1];
 
+    if (current.fontFamily) {
+      usedFonts.add(current.fontFamily);
+    }
+
     if (
       last &&
       last.bold === current.bold &&
       last.italic === current.italic &&
       last.underline === current.underline &&
-      last.strike === current.strike
+      last.doubleUnderline === current.doubleUnderline &&
+      last.dottedUnderline === current.dottedUnderline &&
+      last.strike === current.strike &&
+      last.superscript === current.superscript &&
+      last.subscript === current.subscript &&
+      last.fontFamily === current.fontFamily &&
+      last.fontSize === current.fontSize &&
+      last.color === current.color &&
+      last.highlight === current.highlight
     ) {
       last.text += str;
     } else {
@@ -241,8 +333,34 @@ export function parseRtfToHtml(rawRtf: string): string {
         bold: current.bold,
         italic: current.italic,
         underline: current.underline,
+        doubleUnderline: current.doubleUnderline,
+        dottedUnderline: current.dottedUnderline,
         strike: current.strike,
+        superscript: current.superscript,
+        subscript: current.subscript,
+        fontFamily: current.fontFamily,
+        fontSize: current.fontSize,
+        color: current.color,
+        highlight: current.highlight,
       });
+    }
+  };
+
+  const flushParagraphHtml = (pTagHtml: string) => {
+    if (activeColumnCount > 1) {
+      columnBuffer.push(pTagHtml);
+    } else {
+      paragraphs.push(pTagHtml);
+    }
+  };
+
+  const flushMultiColumnContainer = () => {
+    if (columnBuffer.length > 0) {
+      const colGap = current.columnGap || 24;
+      paragraphs.push(
+        `<div class="doc-columns" style="column-count: ${activeColumnCount}; column-gap: ${colGap}px; -webkit-column-count: ${activeColumnCount}; margin: 16px 0;">${columnBuffer.join('\n')}</div>`
+      );
+      columnBuffer = [];
     }
   };
 
@@ -259,7 +377,7 @@ export function parseRtfToHtml(rawRtf: string): string {
       const lineHtml = renderChunksToHtml(currentChunks);
       if (lineHtml.trim()) {
         let tag = 'p';
-        let styleAttr = '';
+        const styles: string[] = [];
 
         if (current.fontSize >= 20 && current.bold) {
           tag = 'h1';
@@ -270,33 +388,91 @@ export function parseRtfToHtml(rawRtf: string): string {
         }
 
         if (current.align !== 'left') {
-          styleAttr = ` style="text-align: ${current.align};"`;
+          styles.push(`text-align: ${current.align}`);
+        }
+        if (current.lineSpacing) {
+          styles.push(`line-height: ${current.lineSpacing}`);
+        }
+        if (current.spaceBefore) {
+          styles.push(`margin-top: ${current.spaceBefore}pt`);
+        }
+        if (current.spaceAfter) {
+          styles.push(`margin-bottom: ${current.spaceAfter}pt`);
+        } else {
+          styles.push(`margin-bottom: 8px`);
+        }
+        if (current.leftIndent) {
+          styles.push(`margin-left: ${current.leftIndent}pt`);
+        }
+        if (current.rightIndent) {
+          styles.push(`margin-right: ${current.rightIndent}pt`);
+        }
+        if (current.firstLineIndent) {
+          styles.push(`text-indent: ${current.firstLineIndent}pt`);
+        }
+        if (current.hasBottomBorder) {
+          styles.push(`border-bottom: 1px solid #cbd5e1; padding-bottom: 4px`);
         }
 
-        paragraphs.push(`<${tag}${styleAttr}>${lineHtml}</${tag}>`);
+        const styleAttr = styles.length > 0 ? ` style="${styles.join('; ')}"` : '';
+        flushParagraphHtml(`<${tag}${styleAttr}>${lineHtml}</${tag}>`);
       }
       currentChunks = [];
     }
   };
 
+  const flushRow = () => {
+    if (currentCellChunks.length > 0) {
+      currentRowCells.push({
+        chunks: [...currentCellChunks],
+        bgColor: currentCellBgColor,
+      });
+      currentCellChunks = [];
+      currentCellBgColor = undefined;
+    }
+
+    if (currentRowCells.length > 0) {
+      currentTableRows.push({
+        cells: [...currentRowCells],
+        cellX: [...currentCellX],
+      });
+      currentRowCells = [];
+      currentCellX = [];
+    }
+  };
+
   const flushTable = () => {
     if (currentTableRows.length > 0) {
-      let tableHtml = '<table style="width:100%; border-collapse:collapse; margin:1rem 0;"><tbody>';
-      for (let r = 0; r < currentTableRows.length; r++) {
-        const row = currentTableRows[r];
+      // Calculate column widths from cellX right boundaries if available
+      let tableHtml = '<table style="width: 100%; border-collapse: collapse; margin: 16px 0; border: 1px solid #cbd5e1;">';
+
+      for (const row of currentTableRows) {
         tableHtml += '<tr>';
-        for (let c = 0; c < row.cells.length; c++) {
+        const numCells = row.cells.length;
+
+        // Compute widths
+        const widths: number[] = [];
+        if (row.cellX.length >= numCells) {
+          let prev = 0;
+          for (let c = 0; c < numCells; c++) {
+            const w = Math.max(1, row.cellX[c] - prev);
+            widths.push(w);
+            prev = row.cellX[c];
+          }
+        }
+        const totalW = widths.reduce((a, b) => a + b, 0);
+
+        for (let c = 0; c < numCells; c++) {
           const cell = row.cells[c];
-          const cellHtml = renderChunksToHtml(cell.chunks);
-          const isHeader = r === 0 && row.cells.length > 1 && row.cells.some(c => c.chunks.some(ch => ch.bold));
-          const cellTag = isHeader ? 'th' : 'td';
-          const bg = isHeader ? ' background-color: #f8fafc;' : '';
-          tableHtml += `<${cellTag} style="border: 1px solid #cbd5e1; padding: 8px 12px;${bg}">${cellHtml || '&nbsp;'}</${cellTag}>`;
+          const content = renderChunksToHtml(cell.chunks);
+          const widthStyle = totalW > 0 && widths[c] ? `width: ${Math.round((widths[c] / totalW) * 100)}%;` : '';
+          const bgStyle = cell.bgColor ? `background-color: ${cell.bgColor};` : '';
+          tableHtml += `<td style="padding: 8px 12px; border: 1px solid #cbd5e1; ${widthStyle} ${bgStyle}">${content || '&nbsp;'}</td>`;
         }
         tableHtml += '</tr>';
       }
-      tableHtml += '</tbody></table>';
-      paragraphs.push(tableHtml);
+      tableHtml += '</table>';
+      flushParagraphHtml(tableHtml);
       currentTableRows = [];
     }
     inTableMode = false;
@@ -305,7 +481,6 @@ export function parseRtfToHtml(rawRtf: string): string {
   let i = 0;
   const len = text.length;
 
-  // List of RTF header/destination groups that must be fully ignored
   const ignorableDestinations = new Set([
     '*',
     'fonttbl',
@@ -345,7 +520,7 @@ export function parseRtfToHtml(rawRtf: string): string {
     if (char === '{') {
       stateStack.push({ ...current });
 
-      // Peek if this is an ignorable destination group like {\*...} or {\fonttbl...}
+      // Peek if this is an ignorable destination group
       let peek = i + 1;
       while (peek < len && (text[peek] === ' ' || text[peek] === '\r' || text[peek] === '\n')) {
         peek++;
@@ -362,8 +537,7 @@ export function parseRtfToHtml(rawRtf: string): string {
             cIdx++;
           }
         }
-
-        if (current.isDestination || ignorableDestinations.has(cmd)) {
+        if (ignorableDestinations.has(cmd)) {
           current.isDestination = true;
         }
       }
@@ -380,7 +554,6 @@ export function parseRtfToHtml(rawRtf: string): string {
       continue;
     }
 
-    // If currently inside an ignored metadata/destination group, skip content
     if (current.isDestination) {
       if (char === '\\') {
         i++;
@@ -400,27 +573,23 @@ export function parseRtfToHtml(rawRtf: string): string {
 
       const nextChar = text[i];
 
-      // Escaped literals
       if (nextChar === '\\' || nextChar === '{' || nextChar === '}') {
         appendText(nextChar);
         i++;
         continue;
       }
 
-      // Non-breaking space
       if (nextChar === '~') {
         appendText('\u00A0');
         i++;
         continue;
       }
 
-      // Optional hyphen
       if (nextChar === '-') {
         i++;
         continue;
       }
 
-      // Non-breaking hyphen
       if (nextChar === '_') {
         appendText('‑');
         i++;
@@ -434,46 +603,48 @@ export function parseRtfToHtml(rawRtf: string): string {
         if (!isNaN(code)) {
           if (isCyrillic && code >= 0x80) {
             appendText(decodeCp1251Byte(code));
-          } else if (code >= 0xC0 && code <= 0xFF) {
+          } else if (code >= 0xc0 && code <= 0xff) {
             appendText(decodeCp1251Byte(code));
           } else if (code < 128) {
             appendText(String.fromCharCode(code));
           } else {
             appendText(decodeCp1251Byte(code));
           }
+          i += 3;
+          continue;
         }
-        i += 3;
-        continue;
       }
 
-      // Read control word
+      // Parse control word
       let word = '';
       while (i < len && /[a-zA-Z]/.test(text[i])) {
         word += text[i];
         i++;
       }
 
-      // Read optional integer parameter
-      let numStr = '';
-      let isNeg = false;
+      let paramStr = '';
+      let isNegative = false;
       if (i < len && text[i] === '-') {
-        isNeg = true;
+        isNegative = true;
         i++;
       }
       while (i < len && /[0-9]/.test(text[i])) {
-        numStr += text[i];
+        paramStr += text[i];
         i++;
       }
-      const val = numStr ? (isNeg ? -parseInt(numStr, 10) : parseInt(numStr, 10)) : null;
 
-      // Single trailing space is a delimiter in RTF
+      let val: number | null = null;
+      if (paramStr.length > 0) {
+        val = parseInt(paramStr, 10);
+        if (isNegative) val = -val;
+      }
+
       if (i < len && text[i] === ' ') {
         i++;
       }
 
-      // Process control word
       switch (word) {
-        case 'u': // Unicode character \uN
+        case 'u':
           if (val !== null) {
             let cp = val;
             if (cp < 0) cp += 65536;
@@ -483,11 +654,10 @@ export function parseRtfToHtml(rawRtf: string): string {
               appendText('?');
             }
 
-            // Skip `uc` fallback chars (default 1)
             let skipCount = current.uc;
             while (skipCount > 0 && i < len) {
               if (text[i] === '\\' && text[i + 1] === "'") {
-                i += 4; // \'hh
+                i += 4;
                 skipCount--;
               } else if (text[i] === '\\') {
                 break;
@@ -503,6 +673,15 @@ export function parseRtfToHtml(rawRtf: string): string {
           if (val !== null) current.uc = Math.max(0, val);
           break;
 
+        case 'f':
+          if (val !== null && fontTable.has(val)) {
+            current.fontFamily = fontTable.get(val);
+            if (current.fontFamily) {
+              usedFonts.add(current.fontFamily);
+            }
+          }
+          break;
+
         case 'b':
           current.bold = val === null || val !== 0;
           break;
@@ -513,19 +692,61 @@ export function parseRtfToHtml(rawRtf: string): string {
 
         case 'ul':
           current.underline = true;
+          current.doubleUnderline = false;
+          current.dottedUnderline = false;
+          break;
+
+        case 'uldb':
+          current.underline = true;
+          current.doubleUnderline = true;
+          break;
+
+        case 'uld':
+          current.underline = true;
+          current.dottedUnderline = true;
           break;
 
         case 'ulnone':
           current.underline = false;
+          current.doubleUnderline = false;
+          current.dottedUnderline = false;
           break;
 
         case 'strike':
           current.strike = val === null || val !== 0;
           break;
 
-        case 'fs': // Font size in half-points
+        case 'super':
+          current.superscript = true;
+          current.subscript = false;
+          break;
+
+        case 'sub':
+          current.subscript = true;
+          current.superscript = false;
+          break;
+
+        case 'nosupersub':
+          current.superscript = false;
+          current.subscript = false;
+          break;
+
+        case 'fs':
           if (val !== null) {
             current.fontSize = Math.round(val / 2);
+          }
+          break;
+
+        case 'cf': // Foreground text color
+          if (val !== null && colorTable[val]) {
+            current.color = colorTable[val];
+          }
+          break;
+
+        case 'highlight':
+        case 'cb': // Background highlight color
+          if (val !== null && colorTable[val]) {
+            current.highlight = colorTable[val];
           }
           break;
 
@@ -545,6 +766,76 @@ export function parseRtfToHtml(rawRtf: string): string {
           current.align = 'justify';
           break;
 
+        // Multi-column section
+        case 'cols':
+          if (val !== null && val > 1) {
+            flushLine();
+            if (activeColumnCount !== val) {
+              flushMultiColumnContainer();
+              activeColumnCount = val;
+            }
+          } else if (val === 1) {
+            flushLine();
+            flushMultiColumnContainer();
+            activeColumnCount = 1;
+          }
+          break;
+
+        case 'colsx':
+          if (val !== null) {
+            current.columnGap = Math.round(val / 20); // 20 twips = 1 pt
+          }
+          break;
+
+        case 'column': // Column break
+          flushLine();
+          flushParagraphHtml('<div class="column-break" style="break-after: column; -webkit-column-break-after: always;"></div>');
+          break;
+
+        // Line Spacing
+        case 'sl':
+          if (val !== null) {
+            if (val < 0) {
+              // Exact line height in twips
+              current.lineSpacing = Math.round((Math.abs(val) / 20) / 12 * 100) / 100;
+            } else {
+              // 240 twips = single spacing (1.0)
+              current.lineSpacing = Math.round((val / 240) * 100) / 100;
+            }
+          }
+          break;
+
+        case 'sb': // Space before in twips
+          if (val !== null) current.spaceBefore = Math.round(val / 20);
+          break;
+
+        case 'sa': // Space after in twips
+          if (val !== null) current.spaceAfter = Math.round(val / 20);
+          break;
+
+        case 'li': // Left indent in twips
+          if (val !== null) current.leftIndent = Math.round(val / 20);
+          break;
+
+        case 'ri': // Right indent in twips
+          if (val !== null) current.rightIndent = Math.round(val / 20);
+          break;
+
+        case 'fi': // First line indent in twips
+          if (val !== null) current.firstLineIndent = Math.round(val / 20);
+          break;
+
+        case 'brdrb': // Bottom border line on paragraph
+          current.hasBottomBorder = true;
+          break;
+
+        case 'page': // Page break
+          flushLine();
+          flushParagraphHtml(
+            '<div class="page-break" style="page-break-after: always; border-bottom: 2px dashed #94a3b8; margin: 24px 0; padding-bottom: 4px; text-align: center; color: #94a3b8; font-size: 10px; font-weight: bold; text-transform: uppercase;">Page Break</div>'
+          );
+          break;
+
         case 'par':
           flushLine();
           break;
@@ -561,257 +852,306 @@ export function parseRtfToHtml(rawRtf: string): string {
           appendText('• ');
           break;
 
-        case 'trowd': // Start table row definition
+        // Tables
+        case 'trowd':
           if (!inTableMode) {
             flushLine();
             inTableMode = true;
           }
+          currentCellX = [];
           break;
 
-        case 'intbl':
-          inTableMode = true;
-          break;
-
-        case 'cell': // End of table cell
-          if (currentChunks.length > 0) {
-            currentCellChunks.push(...currentChunks);
-            currentChunks = [];
+        case 'cellx':
+          if (val !== null) {
+            currentCellX.push(val);
           }
-          currentRowCells.push({ chunks: [...currentCellChunks] });
-          currentCellChunks = [];
           break;
 
-        case 'row': // End of table row
-          if (currentChunks.length > 0) {
-            currentCellChunks.push(...currentChunks);
-            currentChunks = [];
+        case 'clcbpat': // Cell background color
+          if (val !== null && colorTable[val]) {
+            currentCellBgColor = colorTable[val];
           }
+          break;
+
+        case 'cell':
           if (currentCellChunks.length > 0) {
-            currentRowCells.push({ chunks: [...currentCellChunks] });
+            currentRowCells.push({
+              chunks: [...currentCellChunks],
+              bgColor: currentCellBgColor,
+            });
             currentCellChunks = [];
-          }
-          if (currentRowCells.length > 0) {
-            currentTableRows.push({ cells: [...currentRowCells] });
-            currentRowCells = [];
+            currentCellBgColor = undefined;
           }
           break;
 
-        case 'pard': // Reset paragraph defaults
-          if (inTableMode && currentRowCells.length === 0 && currentTableRows.length > 0) {
-            const nextSlice = text.slice(i, i + 50);
-            if (!nextSlice.includes('\\intbl') && !nextSlice.includes('\\trowd')) {
-              flushTable();
-            }
-          }
+        case 'row':
+          flushRow();
+          break;
+
+        case 'pard':
+          flushLine();
           current.align = 'left';
           current.fontSize = 12;
+          current.spaceBefore = 0;
+          current.spaceAfter = 0;
+          current.leftIndent = 0;
+          current.rightIndent = 0;
+          current.firstLineIndent = 0;
+          current.lineSpacing = 1.4;
+          current.hasBottomBorder = false;
+          break;
+
+        case 'plain':
+          current.bold = false;
+          current.italic = false;
+          current.underline = false;
+          current.doubleUnderline = false;
+          current.dottedUnderline = false;
+          current.strike = false;
+          current.superscript = false;
+          current.subscript = false;
+          current.color = undefined;
+          current.highlight = undefined;
           break;
 
         default:
           break;
       }
+
       continue;
     }
 
-    // Skip carriage returns and newlines in RTF
     if (char === '\r' || char === '\n') {
       i++;
       continue;
     }
 
-    // Raw 8-bit character in text
-    if (isCyrillic && char.charCodeAt(0) >= 0x80 && char.charCodeAt(0) <= 0xFF) {
-      appendText(decodeCp1251Byte(char.charCodeAt(0)));
-      i++;
-      continue;
+    const charCode = text.charCodeAt(i);
+    if (isCyrillic && charCode >= 0xc0 && charCode <= 0xff) {
+      appendText(decodeCp1251Byte(charCode));
+    } else {
+      appendText(char);
     }
-
-    // Regular content character
-    appendText(char);
     i++;
   }
 
-  // End of file cleanup
   flushLine();
+  flushRow();
   flushTable();
+  flushMultiColumnContainer();
 
-  let finalHtml = paragraphs.filter((p) => p.trim()).join('');
-
+  let finalHtml = paragraphs.join('');
   if (!finalHtml.trim()) {
-    finalHtml = '<p>Start typing here...</p>';
+    finalHtml = '<p>&nbsp;</p>';
   }
 
-  // Final pass: clean up any remaining mojibake
   finalHtml = fixCyrillicMojibake(finalHtml);
 
-  return finalHtml;
+  const allDetected = Array.from(new Set([...Array.from(fontTable.values()), ...Array.from(usedFonts)]));
+  return { html: finalHtml, fonts: allDetected };
+}
+
+export function parseRtfToHtml(rawRtf: string): string {
+  return parseRtfWithFonts(rawRtf).html;
 }
 
 /**
- * Serializes rich HTML document into a standardized, compliant RTF string
- * with Unicode escapes (\uN?) for Armenian, Russian, and international symbols,
- * full table specifications (\trowd, \intbl, \cell, \row), and font definitions.
+ * Serializes HTML content from the editor into a valid RTF document
  */
-export function serializeHtmlToRtf(htmlContent: string, title = 'WordCraft Document'): string {
+export function serializeHtmlToRtf(html: string, title = 'Lithora Document'): string {
   const container = document.createElement('div');
-  container.innerHTML = htmlContent;
+  container.innerHTML = html;
 
   let rtfBody = '';
 
-  const processNode = (node: Node): string => {
+  const customFonts = new Set<string>();
+  const fontMatches = html.matchAll(/font-family:\s*['"]?([^;'"]+)['"]?/gi);
+  for (const m of fontMatches) {
+    if (m[1]) {
+      const clean = m[1].split(',')[0].replace(/['"]/g, '').trim();
+      if (clean) customFonts.add(clean);
+    }
+  }
+
+  const baseFonts = ['Calibri', 'Times New Roman', 'Sylfaen', 'Arial'];
+  const fontList = [...baseFonts];
+  for (const cf of customFonts) {
+    if (!fontList.some((f) => f.toLowerCase() === cf.toLowerCase())) {
+      fontList.push(cf);
+    }
+  }
+
+  const fontIdMap = new Map<string, number>();
+  fontList.forEach((f, idx) => fontIdMap.set(f.toLowerCase(), idx));
+
+  const processNode = (
+    node: Node,
+    state: { bold: boolean; italic: boolean; underline: boolean; fontId: number } = {
+      bold: false,
+      italic: false,
+      underline: false,
+      fontId: 0,
+    }
+  ): string => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent || '';
+      if (!text) return '';
       return escapeRtfText(text);
     }
 
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const el = node as HTMLElement;
-      const tag = el.tagName.toLowerCase();
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
-      let inner = '';
-      for (const child of Array.from(el.childNodes)) {
-        inner += processNode(child);
-      }
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
 
-      switch (tag) {
-        case 'h1':
-          return `\\par\\pard\\qc\\b\\fs40 ${inner}\\b0\\fs24\\par\\pard\\ql `;
-        case 'h2':
-          return `\\par\\pard\\ql\\b\\fs32 ${inner}\\b0\\fs24\\par `;
-        case 'h3':
-          return `\\par\\pard\\ql\\b\\fs28 ${inner}\\b0\\fs24\\par `;
-        case 'p': {
-          let alignWord = '\\ql';
-          const style = el.getAttribute('style') || '';
-          if (style.includes('center')) alignWord = '\\qc';
-          else if (style.includes('right')) alignWord = '\\qr';
-          else if (style.includes('justify')) alignWord = '\\qj';
-          return `\\pard${alignWord} ${inner}\\par `;
-        }
-        case 'b':
-        case 'strong':
-          return `\\b ${inner}\\b0 `;
-        case 'i':
-        case 'em':
-          return `\\i ${inner}\\i0 `;
-        case 'u':
-          return `\\ul ${inner}\\ulnone `;
-        case 's':
-        case 'strike':
-          return `\\strike ${inner}\\strike0 `;
-        case 'ul':
-        case 'ol':
-          return `\\par ${inner}\\par `;
-        case 'li':
-          return `{\\pntext\\bullet\\tab}${inner}\\par `;
-        case 'blockquote':
-          return `\\par\\li720\\ri720\\i ${inner}\\i0\\par\\li0\\ri0 `;
-        case 'table':
-          return processTableToRtf(el);
-        case 'tr':
-          return inner;
-        case 'td':
-        case 'th':
-          return `\\pard\\intbl ${inner}\\cell `;
-        case 'hr':
-          return '\\par\\brdrb\\brdrs\\brdrw10\\brsp20 \\par ';
-        case 'br':
-          return '\\line ';
-        default:
-          return inner;
+    let currentFontId = state.fontId;
+    if (el.style && el.style.fontFamily) {
+      const cleanFamily = el.style.fontFamily.split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+      if (fontIdMap.has(cleanFamily)) {
+        currentFontId = fontIdMap.get(cleanFamily)!;
       }
     }
 
-    return '';
-  };
+    let prefix = '';
+    let suffix = '';
+    let nextBold = state.bold;
+    let nextItalic = state.italic;
+    let nextUnderline = state.underline;
 
-  const processTableToRtf = (tableEl: HTMLElement): string => {
-    let tableRtf = '\\par ';
-    const rows = Array.from(tableEl.querySelectorAll('tr'));
-    for (const row of rows) {
-      const cells = Array.from(row.querySelectorAll('td, th'));
-      const numCells = cells.length || 1;
-      const cellWidth = Math.floor(9000 / numCells);
-
-      // Define row header
-      tableRtf += '\\trowd\\trgaph108';
-      let currentRight = cellWidth;
-      for (let c = 0; c < numCells; c++) {
-        tableRtf += `\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx${currentRight}`;
-        currentRight += cellWidth;
-      }
-      tableRtf += ' ';
-
-      // Output row cells
-      for (const cell of cells) {
-        let cellText = '';
-        for (const child of Array.from(cell.childNodes)) {
-          cellText += processNode(child);
-        }
-        tableRtf += `\\pard\\intbl ${cellText}\\cell `;
-      }
-      tableRtf += '\\row ';
+    if (currentFontId !== state.fontId) {
+      prefix += `\\f${currentFontId} `;
+      suffix = `\\f${state.fontId} ` + suffix;
     }
-    tableRtf += '\\pard\\par ';
-    return tableRtf;
+
+    if (tag === 'strong' || tag === 'b') {
+      prefix += '\\b ';
+      suffix = '\\b0 ' + suffix;
+      nextBold = true;
+    } else if (tag === 'em' || tag === 'i') {
+      prefix += '\\i ';
+      suffix = '\\i0 ' + suffix;
+      nextItalic = true;
+    } else if (tag === 'u') {
+      prefix += '\\ul ';
+      suffix = '\\ulnone ' + suffix;
+      nextUnderline = true;
+    } else if (tag === 's' || tag === 'strike') {
+      prefix += '\\strike ';
+      suffix = '\\strike0 ' + suffix;
+    } else if (tag === 'sup') {
+      prefix += '\\super ';
+      suffix = '\\nosupersub ' + suffix;
+    } else if (tag === 'sub') {
+      prefix += '\\sub ';
+      suffix = '\\nosupersub ' + suffix;
+    }
+
+    let innerText = '';
+    for (const child of Array.from(el.childNodes)) {
+      innerText += processNode(child, {
+        bold: nextBold,
+        italic: nextItalic,
+        underline: nextUnderline,
+        fontId: currentFontId,
+      });
+    }
+
+    return prefix + innerText + suffix;
   };
 
-  for (const child of Array.from(container.childNodes)) {
-    rtfBody += processNode(child);
+  const elements = Array.from(container.children);
+  for (const el of elements) {
+    const tagName = el.tagName.toLowerCase();
+
+    if (tagName === 'table') {
+      const rows = Array.from(el.querySelectorAll('tr'));
+      for (const row of rows) {
+        const cells = Array.from(row.querySelectorAll('td, th'));
+        rtfBody += '\\trowd\\trgaph108';
+
+        let cellBoundary = 2000;
+        for (let c = 0; c < cells.length; c++) {
+          rtfBody += `\\cellx${cellBoundary}`;
+          cellBoundary += 2400;
+        }
+        rtfBody += '\n';
+
+        for (const cell of cells) {
+          rtfBody += '\\pard\\intbl ' + processNode(cell) + '\\cell\n';
+        }
+        rtfBody += '\\row\n';
+      }
+      rtfBody += '\\pard\n';
+      continue;
+    }
+
+    if (tagName === 'div' && el.classList.contains('doc-columns')) {
+      const colCount = el.getAttribute('style')?.match(/column-count:\s*(\d+)/)?.[1] || '2';
+      rtfBody += `\\cols${colCount}\\colsx720\n`;
+      for (const child of Array.from(el.children)) {
+        rtfBody += '\\pard ' + processNode(child) + '\\par\n';
+      }
+      rtfBody += '\\cols1\n';
+      continue;
+    }
+
+    if (tagName.startsWith('h')) {
+      const fontSize = tagName === 'h1' ? 44 : tagName === 'h2' ? 36 : 28;
+      rtfBody += `\\pard\\sb200\\sa120\\b\\fs${fontSize} ` + processNode(el) + '\\b0\\fs24\\par\n';
+      continue;
+    }
+
+    if (tagName === 'hr' || el.classList.contains('doc-line')) {
+      rtfBody += '\\pard\\brdrb\\brdrs\\brdrw10\\brsp20 \\par\\pard\n';
+      continue;
+    }
+
+    // Paragraph
+    let pPrefix = '\\pard\\sa120\\sl360\\slmult1';
+    const style = el.getAttribute('style') || '';
+    if (style.includes('center')) pPrefix += '\\qc';
+    else if (style.includes('right')) pPrefix += '\\qr';
+    else if (style.includes('justify')) pPrefix += '\\qj';
+
+    rtfBody += `${pPrefix} ` + processNode(el) + '\\par\n';
   }
 
-  // Construct standard RTF wrapper with Calibri, Times New Roman, Sylfaen (for Armenian), and Arial
-  return `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033
-{\\fonttbl
-{\\f0\\fnil\\fcharset0 Calibri;}
-{\\f1\\fnil\\fcharset0 Times New Roman;}
-{\\f2\\fnil\\fcharset0 Sylfaen;}
-{\\f3\\fnil\\fcharset0 Arial;}
-}
-{\\colortbl ;\\red15\\green23\\blue42;\\red37\\green99\\blue235;\\red220\\green38\\blue38;}
-{\\info{\\title ${escapeRtfText(title)}}{\\author WordCraft Suite}}
-\\viewkind4\\uc1\\pard\\f0\\fs24 
-${rtfBody}
-}`;
+  let fontTableRtf = '{\\fonttbl';
+  fontList.forEach((font, idx) => {
+    fontTableRtf += `{\\f${idx}\\fnil\\fcharset0 ${font};}`;
+  });
+  fontTableRtf += '}';
+
+  return `{\\rtf1\\ansi\\ansicpg1251\\deff0\\deflang1049\n${fontTableRtf}\n{\\colortbl;\\red0\\green0\\blue0;\\red0\\green0\\blue255;\\red255\\green0\\blue0;\\red0\\green128\\blue0;}\n\\viewkind4\\uc1\n${rtfBody}}`;
 }
 
-/**
- * Escapes characters for RTF, crucially converting any non-ASCII characters
- * (Russian Cyrillic, Armenian alphabet) into Unicode escape sequences \uN?
- */
-export function escapeRtfText(text: string): string {
+function escapeRtfText(text: string): string {
   let result = '';
   for (let i = 0; i < text.length; i++) {
-    const char = text[i];
     const code = text.charCodeAt(i);
+    const char = text[i];
 
-    if (char === '\\') {
-      result += '\\\\';
-    } else if (char === '{') {
-      result += '\\{';
-    } else if (char === '}') {
-      result += '\\}';
-    } else if (char === '\n') {
-      result += '\\par ';
-    } else if (char === '\r') {
-      // ignore
-    } else if (code < 128) {
+    if (char === '\\') result += '\\\\';
+    else if (char === '{') result += '\\{';
+    else if (char === '}') result += '\\}';
+    else if (char === '\n') result += '\\line ';
+    else if (char === '\t') result += '\\tab ';
+    else if (code >= 32 && code <= 126) {
       result += char;
     } else {
-      // Unicode escape: \uN?
-      // RTF uses signed 16-bit integers: if code > 32767, use code - 65536
-      const signedCode = code > 32767 ? code - 65536 : code;
+      let signedCode = code;
+      if (signedCode > 32767) signedCode -= 65536;
       result += `\\u${signedCode}?`;
     }
   }
   return result;
 }
 
-function escapeHtml(str: string): string {
-  return str
+function escapeHtml(text: string): string {
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/'/g, '&#39;');
 }

@@ -155,7 +155,7 @@ export interface Translations {
 
 export const translations: Record<Language, Translations> = {
   en: {
-    appName: 'WordCraft',
+    appName: 'Lithora',
     tagline: 'Multilingual Word & RTF Document Suite',
     newDoc: 'New Document',
     untitled: 'Untitled Document',
@@ -297,7 +297,7 @@ export const translations: Record<Language, Translations> = {
     langIndicator: 'English (US)',
   },
   ru: {
-    appName: 'WordCraft',
+    appName: 'Lithora',
     tagline: 'Многоязычный редактор документов Word и RTF',
     newDoc: 'Новый документ',
     untitled: 'Документ без названия',
@@ -439,7 +439,7 @@ export const translations: Record<Language, Translations> = {
     langIndicator: 'Русский',
   },
   hy: {
-    appName: 'WordCraft',
+    appName: 'Lithora',
     tagline: 'Բազմալեզու Word և RTF փաստաթղթերի խմբագիր',
     newDoc: 'Նոր փաստաթուղթ',
     untitled: 'Անանուն փաստաթուղթ',

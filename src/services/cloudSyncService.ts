@@ -97,7 +97,7 @@ export function exportCloudBackupJson(documents: DocumentTab[]): string {
   const backup = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    system: 'WordCraft Document Suite',
+    system: 'Lithora Document Suite',
     documents,
     snapshots,
   };

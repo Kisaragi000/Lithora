@@ -1,4 +1,19 @@
-export type DocumentFormat = 'docx' | 'rtf' | 'txt' | 'html' | 'md';
+export type DocumentFormat =
+  | 'docx'
+  | 'docm'
+  | 'dotx'
+  | 'dotm'
+  | 'doc'
+  | 'dot'
+  | 'rtf'
+  | 'rtx'
+  | 'odt'
+  | 'txt'
+  | 'html'
+  | 'htm'
+  | 'xml'
+  | 'md'
+  | 'pdf';
 
 export type Language = 'en' | 'ru' | 'hy';
 
@@ -31,6 +46,9 @@ export interface DocumentTab {
   pageSettings: PageSettings;
   historyUndo: string[];
   historyRedo: string[];
+  detectedFonts?: string[];
+  missingFonts?: import('../services/fontReplacementService').MissingFontReport[];
+  dismissedFontWarning?: boolean;
 }
 
 export interface CloudSnapshot {

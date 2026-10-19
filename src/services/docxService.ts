@@ -1,4 +1,6 @@
+import JSZip from 'jszip';
 import mammoth from 'mammoth';
+import * as docxPreview from 'docx-preview';
 import {
   Document,
   Packer,
@@ -14,16 +16,104 @@ import {
 } from 'docx';
 
 /**
- * Parses an ArrayBuffer of a .docx file into clean HTML for the editor
+ * Extracts all font family names declared in word/fontTable.xml and word/document.xml
  */
-export async function parseDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
+export async function extractDocxFonts(arrayBuffer: ArrayBuffer): Promise<string[]> {
+  const fonts = new Set<string>();
   try {
-    const result = await mammoth.convertToHtml({ arrayBuffer });
+    const zip = await JSZip.loadAsync(arrayBuffer);
+
+    // 1. Inspect word/fontTable.xml
+    const fontTableFile = zip.file('word/fontTable.xml');
+    if (fontTableFile) {
+      const xml = await fontTableFile.async('text');
+      const matches = xml.matchAll(/w:name="([^"]+)"/g);
+      for (const m of matches) {
+        if (m[1] && !m[1].startsWith('@')) {
+          fonts.add(m[1].trim());
+        }
+      }
+    }
+
+    // 2. Inspect word/document.xml for inline run fonts
+    const docFile = zip.file('word/document.xml');
+    if (docFile) {
+      const xml = await docFile.async('text');
+      const fontAttrs = xml.matchAll(/w:rFonts[^>]*?(?:w:ascii|w:hAnsi|w:cs)="([^"]+)"/g);
+      for (const m of fontAttrs) {
+        if (m[1] && !m[1].startsWith('@')) {
+          fonts.add(m[1].trim());
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Could not inspect DOCX fonts:', e);
+  }
+  return Array.from(fonts);
+}
+
+/**
+ * Parses an ArrayBuffer of a .docx file into rich HTML retaining columns, lines, and formatting
+ */
+export async function parseDocxWithFonts(arrayBuffer: ArrayBuffer): Promise<{ html: string; fonts: string[] }> {
+  const fonts = await extractDocxFonts(arrayBuffer);
+
+  // 1. Try high-fidelity docx-preview in browser environment
+  if (typeof document !== 'undefined') {
+    try {
+      const bodyContainer = document.createElement('div');
+      const styleContainer = document.createElement('div');
+
+      await docxPreview.renderAsync(arrayBuffer, bodyContainer, styleContainer, {
+        className: 'docx-rendered',
+        inWrapper: false,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+        renderHeaders: true,
+        renderFooters: true,
+      });
+
+      const styles = styleContainer.innerHTML;
+      const bodyContent = bodyContainer.innerHTML;
+
+      if (bodyContent && bodyContent.trim().length > 0) {
+        // Wrap in clean container with scoped styles
+        const fullHtml = `${styles ? `<style>${styles}</style>` : ''}<div class="docx-document-root">${bodyContent}</div>`;
+        return { html: fullHtml, fonts };
+      }
+    } catch (renderErr) {
+      console.warn('docx-preview could not render, falling back to enhanced Mammoth:', renderErr);
+    }
+  }
+
+  // 2. Fallback to Mammoth with full style mapping
+  try {
+    const result = await mammoth.convertToHtml(
+      { arrayBuffer },
+      {
+        styleMap: [
+          "p[style-name='Heading 1'] => h1:fresh",
+          "p[style-name='Heading 2'] => h2:fresh",
+          "p[style-name='Heading 3'] => h3:fresh",
+          "p[style-name='Title'] => h1.title:fresh",
+          "p[style-name='Subtitle'] => p.subtitle:fresh",
+          "r[style-name='Strong'] => strong",
+          "r[style-name='Emphasis'] => em",
+        ],
+      }
+    );
     let html = result.value;
     if (!html || html.trim() === '') {
       html = '<p>Empty document</p>';
     }
-    return html;
+
+    if (fonts.length > 0) {
+      const primaryFont = fonts[0];
+      html = `<div style="font-family: '${primaryFont}', sans-serif;">${html}</div>`;
+    }
+
+    return { html, fonts };
   } catch (error) {
     console.error('Error parsing docx file with mammoth:', error);
     throw new Error('Failed to parse Word (.docx) document.');
@@ -31,35 +121,82 @@ export async function parseDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string>
 }
 
 /**
+ * Parses an ArrayBuffer of a .docx file into clean HTML for the editor
+ */
+export async function parseDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
+  const { html } = await parseDocxWithFonts(arrayBuffer);
+  return html;
+}
+
+/**
  * Converts HTML content from the editor into a valid .docx Blob
  */
-export async function generateDocxBlob(htmlContent: string, title = 'WordCraft Document'): Promise<Blob> {
+export async function generateDocxBlob(htmlContent: string, title = 'Lithora Document'): Promise<Blob> {
   const container = document.createElement('div');
   container.innerHTML = htmlContent;
 
+  // Remove <style> and <script> tags before converting to docx
+  const styles = container.querySelectorAll('style, script');
+  styles.forEach((s) => s.remove());
+
   const docChildren: Array<Paragraph | Table> = [];
 
-  // Parse HTML elements into docx Paragraphs and Tables
-  const elements = Array.from(container.children);
-  if (elements.length === 0 && container.textContent) {
+  // Recursively collect elements from nested containers
+  collectDocxElements(container, docChildren);
+
+  if (docChildren.length === 0) {
+    const text = container.textContent || '';
     docChildren.push(
       new Paragraph({
-        children: [new TextRun(container.textContent)],
+        children: [new TextRun(text || 'Empty document')],
       })
     );
   }
 
-  for (const el of elements) {
+  const doc = new Document({
+    title,
+    creator: 'Lithora Document Suite',
+    description: 'Generated by Lithora Multilingual Suite',
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: 1440,
+              bottom: 1440,
+              left: 1440,
+              right: 1440,
+            },
+          },
+        },
+        children: docChildren,
+      },
+    ],
+  });
+
+  return await Packer.toBlob(doc);
+}
+
+function collectDocxElements(parent: Element, docChildren: Array<Paragraph | Table>) {
+  const children = Array.from(parent.children);
+
+  for (const el of children) {
     const tagName = el.tagName.toLowerCase();
 
+    if (tagName === 'style' || tagName === 'script') continue;
+
     if (tagName === 'table') {
-      const table = convertHtmlTableToDocx(el as HTMLTableElement);
-      docChildren.push(table);
+      docChildren.push(convertHtmlTableToDocx(el as HTMLTableElement));
       continue;
     }
 
-    if (tagName.startsWith('h')) {
-      const level = tagName === 'h1' ? HeadingLevel.HEADING_1 : tagName === 'h2' ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
+    if (tagName.startsWith('h') && tagName.length === 2) {
+      const level =
+        tagName === 'h1'
+          ? HeadingLevel.HEADING_1
+          : tagName === 'h2'
+          ? HeadingLevel.HEADING_2
+          : HeadingLevel.HEADING_3;
       const textRuns = extractTextRuns(el as HTMLElement);
       docChildren.push(
         new Paragraph({
@@ -98,46 +235,36 @@ export async function generateDocxBlob(htmlContent: string, title = 'WordCraft D
       continue;
     }
 
-    // Default paragraph
-    let alignment: (typeof AlignmentType)[keyof typeof AlignmentType] = AlignmentType.LEFT;
-    const style = el.getAttribute('style') || '';
-    if (style.includes('center')) alignment = AlignmentType.CENTER;
-    else if (style.includes('right')) alignment = AlignmentType.RIGHT;
-    else if (style.includes('justify')) alignment = AlignmentType.JUSTIFIED;
+    if (tagName === 'p') {
+      let alignment: (typeof AlignmentType)[keyof typeof AlignmentType] = AlignmentType.LEFT;
+      const style = el.getAttribute('style') || '';
+      if (style.includes('center')) alignment = AlignmentType.CENTER;
+      else if (style.includes('right')) alignment = AlignmentType.RIGHT;
+      else if (style.includes('justify')) alignment = AlignmentType.JUSTIFIED;
 
-    const runs = extractTextRuns(el as HTMLElement);
-    docChildren.push(
-      new Paragraph({
-        alignment,
-        children: runs.length > 0 ? runs : [new TextRun({ text: '' })],
-        spacing: { before: 60, after: 120 },
-      })
-    );
+      const runs = extractTextRuns(el as HTMLElement);
+      docChildren.push(
+        new Paragraph({
+          alignment,
+          children: runs.length > 0 ? runs : [new TextRun({ text: '' })],
+          spacing: { before: 60, after: 120 },
+        })
+      );
+      continue;
+    }
+
+    // If it's a section, div, article, main, or doc-columns container, recurse
+    if (
+      tagName === 'section' ||
+      tagName === 'div' ||
+      tagName === 'article' ||
+      tagName === 'main' ||
+      tagName === 'header' ||
+      tagName === 'footer'
+    ) {
+      collectDocxElements(el, docChildren);
+    }
   }
-
-  // Create docx Document
-  const doc = new Document({
-    title,
-    creator: 'WordCraft Document Suite',
-    description: 'Generated by WordCraft Multilingual Suite',
-    sections: [
-      {
-        properties: {
-          page: {
-            margin: {
-              top: 1440, // 1 inch / 25mm in twips
-              bottom: 1440,
-              left: 1440,
-              right: 1440,
-            },
-          },
-        },
-        children: docChildren.length > 0 ? docChildren : [new Paragraph({ children: [new TextRun('')] })],
-      },
-    ],
-  });
-
-  return await Packer.toBlob(doc);
 }
 
 /**
@@ -146,7 +273,10 @@ export async function generateDocxBlob(htmlContent: string, title = 'WordCraft D
 function extractTextRuns(element: HTMLElement): TextRun[] {
   const runs: TextRun[] = [];
 
-  const walk = (node: Node, formatting: { bold: boolean; italic: boolean; underline: boolean; color?: string; font?: string }) => {
+  const walk = (
+    node: Node,
+    formatting: { bold: boolean; italic: boolean; underline: boolean; color?: string; font?: string }
+  ) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent || '';
       if (text) {
@@ -170,7 +300,12 @@ function extractTextRuns(element: HTMLElement): TextRun[] {
       const style = el.getAttribute('style') || '';
 
       const nextFormatting = { ...formatting };
-      if (tag === 'b' || tag === 'strong' || style.includes('font-weight: bold') || style.includes('font-weight: 700')) {
+      if (
+        tag === 'b' ||
+        tag === 'strong' ||
+        style.includes('font-weight: bold') ||
+        style.includes('font-weight: 700')
+      ) {
         nextFormatting.bold = true;
       }
       if (tag === 'i' || tag === 'em' || style.includes('font-style: italic')) {
@@ -228,7 +363,10 @@ function convertHtmlTableToDocx(tableEl: HTMLTableElement): Table {
 
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: docxRows.length > 0 ? docxRows : [new TableRow({ children: [new TableCell({ children: [new Paragraph('')] })] })],
+    rows:
+      docxRows.length > 0
+        ? docxRows
+        : [new TableRow({ children: [new TableCell({ children: [new Paragraph('')] })] })],
     borders: {
       top: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },
       bottom: { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' },

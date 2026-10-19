@@ -12,9 +12,28 @@ import {
   sampleEnglishDoc,
   sampleArmenianDoc,
   sampleRussianDoc,
+  sampleMissingFontsDoc,
+  sampleProofreadingDoc,
 } from './data/sampleDocuments';
-import { parseRtfToHtml, serializeHtmlToRtf, fixCyrillicMojibake } from './services/rtfParser';
-import { parseDocxToHtml, generateDocxBlob } from './services/docxService';
+import { parseRtfToHtml, parseRtfWithFonts, serializeHtmlToRtf, fixCyrillicMojibake } from './services/rtfParser';
+import { parseDocxToHtml, parseDocxWithFonts, generateDocxBlob } from './services/docxService';
+import { parseOdtToHtml } from './services/odtService';
+import { parseDocBinaryToHtml } from './services/docBinaryService';
+import { parseXmlWordToHtml } from './services/xmlWordService';
+import { analyzeDocumentFonts, applyFontReplacement, MissingFontReport } from './services/fontReplacementService';
+import {
+  proofreadTextLocally,
+  injectLavenderMarksIntoHtml,
+  clearLavenderMarksFromHtml,
+  acceptSuggestionInHtml,
+  dismissSuggestionInHtml,
+  acceptAllSuggestionsInHtml,
+  ProofreadSuggestion,
+  ProofreadLanguage,
+} from './services/localProofreaderService';
+import { ProofreadFloatingBar } from './components/Editor/ProofreadFloatingBar';
+import { MissingFontsModal } from './components/Modals/MissingFontsModal';
+import { MissingFontsBanner } from './components/Editor/MissingFontsBanner';
 import {
   loadPersistedDocuments,
   persistDocuments,
@@ -38,9 +57,15 @@ import { FindReplaceBar } from './components/Panels/FindReplaceBar';
 import { DocumentOutlinePanel } from './components/Panels/DocumentOutlinePanel';
 import { VirtualKeyboardHelper } from './components/Panels/VirtualKeyboardHelper';
 import { CloudRevisionDrawer } from './components/Panels/CloudRevisionDrawer';
+import { preloadPopularGoogleFonts } from './services/googleFontsService';
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState<Language>('en');
+
+  // Pre-load popular Google Fonts
+  useEffect(() => {
+    preloadPopularGoogleFonts();
+  }, []);
 
   // Multi-document tab workspace
   const [documents, setDocuments] = useState<DocumentTab[]>(() => {
@@ -74,6 +99,27 @@ export default function App() {
   const [isSymbolsModalOpen, setIsSymbolsModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isRevisionDrawerOpen, setIsRevisionDrawerOpen] = useState(false);
+
+  // Missing Fonts detection & replacement state
+  const [missingFontsByDoc, setMissingFontsByDoc] = useState<Record<string, MissingFontReport[]>>({});
+  const [dismissedMissingFontsByDoc, setDismissedMissingFontsByDoc] = useState<Record<string, boolean>>({});
+  const [isMissingFontsModalOpen, setIsMissingFontsModalOpen] = useState(false);
+
+  // Local AI Proofreading State
+  const [isProofreading, setIsProofreading] = useState(false);
+  const [proofreadLanguage, setProofreadLanguage] = useState<ProofreadLanguage>('auto');
+  const [proofreadSuggestionsByDoc, setProofreadSuggestionsByDoc] = useState<Record<string, ProofreadSuggestion[]>>({});
+  const [proofreadActiveIndexByDoc, setProofreadActiveIndexByDoc] = useState<Record<string, number>>({});
+  const [showProofreadBar, setShowProofreadBar] = useState(false);
+
+  // Active document's missing fonts (if not dismissed)
+  const activeDocMissingFonts =
+    (!dismissedMissingFontsByDoc[activeDoc?.id || ''] ? missingFontsByDoc[activeDoc?.id || ''] : []) || [];
+
+  // Active document's proofread suggestions
+  const activeDocSuggestions = (activeDoc && proofreadSuggestionsByDoc[activeDoc.id]) || [];
+  const activeDocSuggestionIndex = (activeDoc && proofreadActiveIndexByDoc[activeDoc.id]) || 0;
+  const hasActiveProofreadMarks = activeDocSuggestions.length > 0;
 
   // Auxiliary panels
   const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
@@ -342,53 +388,262 @@ export default function App() {
     setActiveTabId(newId);
   };
 
-  const handleLoadSample = (type: 'en' | 'hy' | 'ru') => {
+  // Apply selected font replacements from modal
+  const handleApplyFontReplacements = (replacements: Record<string, string>) => {
+    if (!activeDoc) return;
+    let updatedContent = activeDoc.content;
+    for (const [missingFont, replacement] of Object.entries(replacements)) {
+      updatedContent = applyFontReplacement(updatedContent, missingFont, replacement);
+    }
+    handleContentChange(updatedContent);
+
+    // Filter out replaced fonts from the missing list
+    setMissingFontsByDoc((prev) => {
+      const current = prev[activeDoc.id] || [];
+      const remaining = current.filter((mf) => !replacements[mf.fontName]);
+      return { ...prev, [activeDoc.id]: remaining };
+    });
+  };
+
+  // One-click Auto-Replace all suggested fonts from banner
+  const handleAutoApplyAllSuggestions = () => {
+    if (!activeDoc || activeDocMissingFonts.length === 0) return;
+    const replacements: Record<string, string> = {};
+    activeDocMissingFonts.forEach((mf) => {
+      replacements[mf.fontName] = mf.suggestedReplacement;
+    });
+    handleApplyFontReplacements(replacements);
+  };
+
+  // Keep original fonts intact and dismiss warning
+  const handleDismissMissingFontsWarning = () => {
+    if (!activeDoc) return;
+    setDismissedMissingFontsByDoc((prev) => ({
+      ...prev,
+      [activeDoc.id]: true,
+    }));
+  };
+
+  // Keep original fonts from modal
+  const handleKeepOriginals = () => {
+    handleDismissMissingFontsWarning();
+    setIsMissingFontsModalOpen(false);
+  };
+
+  // Local AI Proofreader execution
+  const handleRunProofread = (targetLang?: ProofreadLanguage) => {
+    if (!activeDoc) return;
+    setIsProofreading(true);
+    const langToUse = targetLang || proofreadLanguage;
+
+    // Extract raw text from active document
+    const parser = new DOMParser();
+    const docDom = parser.parseFromString(activeDoc.content, 'text/html');
+    const plainText = docDom.body.textContent || '';
+
+    // Execute 100% locally and offline in browser
+    setTimeout(() => {
+      const result = proofreadTextLocally(plainText, langToUse);
+
+      if (result.suggestions.length > 0) {
+        // Inject lavender highlights
+        const markedHtml = injectLavenderMarksIntoHtml(activeDoc.content, result.suggestions);
+        handleContentChange(markedHtml);
+        setProofreadSuggestionsByDoc((prev) => ({
+          ...prev,
+          [activeDoc.id]: result.suggestions,
+        }));
+        setProofreadActiveIndexByDoc((prev) => ({
+          ...prev,
+          [activeDoc.id]: 0,
+        }));
+        setShowProofreadBar(true);
+      } else {
+        setProofreadSuggestionsByDoc((prev) => ({
+          ...prev,
+          [activeDoc.id]: [],
+        }));
+        setShowProofreadBar(true);
+      }
+      setIsProofreading(false);
+    }, 120);
+  };
+
+  // Accept a single suggestion
+  const handleAcceptProofreadSuggestion = (suggestionId: string) => {
+    if (!activeDoc) return;
+    const updatedHtml = acceptSuggestionInHtml(activeDoc.content, suggestionId);
+    handleContentChange(updatedHtml);
+
+    setProofreadSuggestionsByDoc((prev) => {
+      const remaining = (prev[activeDoc.id] || []).filter((s) => s.id !== suggestionId);
+      return { ...prev, [activeDoc.id]: remaining };
+    });
+  };
+
+  // Dismiss a single suggestion without changing text
+  const handleDismissProofreadSuggestion = (suggestionId: string) => {
+    if (!activeDoc) return;
+    const updatedHtml = dismissSuggestionInHtml(activeDoc.content, suggestionId);
+    handleContentChange(updatedHtml);
+
+    setProofreadSuggestionsByDoc((prev) => {
+      const remaining = (prev[activeDoc.id] || []).filter((s) => s.id !== suggestionId);
+      return { ...prev, [activeDoc.id]: remaining };
+    });
+  };
+
+  // Accept all suggestions at once
+  const handleAcceptAllProofread = () => {
+    if (!activeDoc) return;
+    const updatedHtml = acceptAllSuggestionsInHtml(activeDoc.content);
+    handleContentChange(updatedHtml);
+    setProofreadSuggestionsByDoc((prev) => ({ ...prev, [activeDoc.id]: [] }));
+    setShowProofreadBar(false);
+  };
+
+  // Clear all lavender highlights without applying changes
+  const handleClearProofreadHighlights = () => {
+    if (!activeDoc) return;
+    const updatedHtml = clearLavenderMarksFromHtml(activeDoc.content);
+    handleContentChange(updatedHtml);
+    setProofreadSuggestionsByDoc((prev) => ({ ...prev, [activeDoc.id]: [] }));
+    setShowProofreadBar(false);
+  };
+
+  // Navigate through suggestions and scroll into view
+  const handleCycleProofread = (direction: 'next' | 'prev') => {
+    if (!activeDoc || activeDocSuggestions.length === 0 || !editorRef.current) return;
+    const count = activeDocSuggestions.length;
+    let nextIdx =
+      direction === 'next'
+        ? (activeDocSuggestionIndex + 1) % count
+        : (activeDocSuggestionIndex - 1 + count) % count;
+
+    setProofreadActiveIndexByDoc((prev) => ({ ...prev, [activeDoc.id]: nextIdx }));
+
+    const targetSuggestion = activeDocSuggestions[nextIdx];
+    if (targetSuggestion) {
+      const el = editorRef.current.querySelector(
+        `.proofread-lavender-mark[data-proofread-id="${targetSuggestion.id}"]`
+      );
+      if (el) {
+        editorRef.current
+          .querySelectorAll('.proofread-lavender-mark')
+          .forEach((m) => m.classList.remove('active-inspect'));
+        el.classList.add('active-inspect');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  };
+
+  const handleLoadSample = async (type: 'en' | 'hy' | 'ru' | 'fonts' | 'proofread') => {
     const sample =
       type === 'en'
         ? sampleEnglishDoc
         : type === 'hy'
         ? sampleArmenianDoc
-        : sampleRussianDoc;
+        : type === 'ru'
+        ? sampleRussianDoc
+        : type === 'fonts'
+        ? sampleMissingFontsDoc
+        : sampleProofreadingDoc;
 
     const newId = `doc_sample_${type}_${Date.now()}`;
     const clonedSample = { ...sample, id: newId };
+
+    if (type === 'fonts') {
+      try {
+        const fontAnalysis = await analyzeDocumentFonts(
+          ['Aptos Display', 'Aptos', 'Cambria', 'Consolas'],
+          clonedSample.content
+        );
+        if (fontAnalysis.missingFonts.length > 0) {
+          setMissingFontsByDoc((prev) => ({
+            ...prev,
+            [newId]: fontAnalysis.missingFonts,
+          }));
+        }
+      } catch (e) {
+        console.warn('Font analysis error:', e);
+      }
+    } else if (type === 'proofread') {
+      // Auto proofread sample immediately so lavender highlights are ready to inspect!
+      const parser = new DOMParser();
+      const docDom = parser.parseFromString(clonedSample.content, 'text/html');
+      const plainText = docDom.body.textContent || '';
+      const result = proofreadTextLocally(plainText, 'auto');
+      if (result.suggestions.length > 0) {
+        clonedSample.content = injectLavenderMarksIntoHtml(clonedSample.content, result.suggestions);
+        setProofreadSuggestionsByDoc((prev) => ({
+          ...prev,
+          [newId]: result.suggestions,
+        }));
+        setProofreadActiveIndexByDoc((prev) => ({
+          ...prev,
+          [newId]: 0,
+        }));
+        setShowProofreadBar(true);
+      }
+    }
+
     setDocuments((prev) => [...prev, clonedSample]);
     setActiveTabId(newId);
   };
 
-  // Robust Multi-File Ingestion (DOCX, RTF, HTML, TXT, MD)
+  // Robust Multi-File Ingestion for all Word formats (.docx, .docm, .dotx, .dotm, .doc, .dot, .rtf, .rtx, .odt, .xml, .txt, .html, .md)
   const handleFilesSelected = async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
 
     const newDocs: DocumentTab[] = [];
+    const newMissingMap: Record<string, MissingFontReport[]> = {};
 
     for (const file of fileArray) {
       const fileNameLower = file.name.toLowerCase();
       let extension = fileNameLower.split('.').pop() || '';
 
-      if (
+      const isDocxType =
+        extension === 'docx' ||
+        extension === 'docm' ||
+        extension === 'dotx' ||
+        extension === 'dotm' ||
+        file.type.includes('wordprocessingml') ||
+        file.type.includes('macroEnabled.12');
+
+      const isRtfType =
+        extension === 'rtf' ||
+        extension === 'rtx' ||
         file.type === 'application/rtf' ||
         file.type === 'text/rtf' ||
-        file.type === 'text/richtext'
-      ) {
-        extension = 'rtf';
-      } else if (
-        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      ) {
-        extension = 'docx';
-      }
+        file.type === 'text/richtext';
+
+      const isOdtType =
+        extension === 'odt' ||
+        file.type.includes('oasis.opendocument.text');
+
+      const isDocBinaryType =
+        extension === 'doc' ||
+        extension === 'dot' ||
+        file.type === 'application/msword';
+
+      const isXmlType =
+        extension === 'xml' ||
+        file.type.includes('xml');
 
       let format: DocumentFormat = 'docx';
       let content = '<p>Empty document</p>';
+      let detectedFonts: string[] = [];
 
       try {
-        if (extension === 'docx') {
-          format = 'docx';
+        if (isDocxType) {
+          format = (extension as DocumentFormat) || 'docx';
           const buffer = await file.arrayBuffer();
-          content = await parseDocxToHtml(buffer);
-        } else if (extension === 'rtf') {
-          format = 'rtf';
+          const parsed = await parseDocxWithFonts(buffer);
+          content = parsed.html;
+          detectedFonts = parsed.fonts;
+        } else if (isRtfType) {
+          format = extension === 'rtx' ? 'rtx' : 'rtf';
           const buffer = await file.arrayBuffer();
           const uint8 = new Uint8Array(buffer);
 
@@ -421,30 +676,74 @@ export default function App() {
             }
           }
 
-          content = parseRtfToHtml(text);
+          const parsed = parseRtfWithFonts(text);
+          content = parsed.html;
+          detectedFonts = parsed.fonts;
+        } else if (isOdtType) {
+          format = 'odt';
+          const buffer = await file.arrayBuffer();
+          const parsed = await parseOdtToHtml(buffer);
+          content = parsed.html;
+          detectedFonts = parsed.fonts;
+        } else if (isDocBinaryType) {
+          format = extension === 'dot' ? 'dot' : 'doc';
+          const buffer = await file.arrayBuffer();
+          const parsed = await parseDocBinaryToHtml(buffer);
+          content = parsed.html;
+          detectedFonts = parsed.fonts;
+        } else if (isXmlType) {
+          format = 'xml';
+          const text = await file.text();
+          if (text.includes('<w:wordDocument') || text.includes('<pkg:package')) {
+            const parsed = parseXmlWordToHtml(text);
+            content = parsed.html;
+            detectedFonts = parsed.fonts;
+          } else {
+            content = `<pre style="font-family: monospace; white-space: pre-wrap; padding: 12px; background: #f8fafc; border-radius: 6px;">${text}</pre>`;
+          }
         } else {
           // Check if file content begins with {\rtf
           const buffer = await file.arrayBuffer();
           const text = new TextDecoder('utf-8').decode(buffer);
           if (text.trim().toLowerCase().startsWith('{\\rtf')) {
             format = 'rtf';
-            content = parseRtfToHtml(text);
-          } else if (extension === 'html' || extension === 'htm') {
+            const parsed = parseRtfWithFonts(text);
+            content = parsed.html;
+            detectedFonts = parsed.fonts;
+          } else if (extension === 'html' || extension === 'htm' || extension === 'mht' || extension === 'mhtml') {
             format = 'html';
             content = text;
+            const matches = content.matchAll(/font-family:\s*['"]?([^'";,\n]+)/gi);
+            for (const m of matches) {
+              if (m[1] && !m[1].startsWith('@')) {
+                detectedFonts.push(m[1].trim());
+              }
+            }
           } else {
-            format = extension === 'md' ? 'md' : 'txt';
+            format = extension === 'md' || extension === 'markdown' ? 'md' : 'txt';
             content = text
               .split('\n')
-              .map((line) => `<p>${line || '&nbsp;'}</p>`)
+              .map((line) => `<p style="margin-bottom: 6px; line-height: 1.4;">${line || '&nbsp;'}</p>`)
               .join('');
           }
         }
 
         content = fixCyrillicMojibake(content);
 
+        const docId = `doc_imported_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+        // Analyze detected fonts to keep intact and alert on missing fonts
+        try {
+          const fontAnalysis = await analyzeDocumentFonts(detectedFonts, content);
+          if (fontAnalysis.missingFonts.length > 0) {
+            newMissingMap[docId] = fontAnalysis.missingFonts;
+          }
+        } catch (fontErr) {
+          console.warn('Could not analyze document fonts:', fontErr);
+        }
+
         newDocs.push({
-          id: `doc_imported_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          id: docId,
           title: file.name,
           format,
           content,
@@ -465,7 +764,6 @@ export default function App() {
         });
       } catch (err) {
         console.error(`Error processing file ${file.name}:`, err);
-        // Fallback: load as plain text
         try {
           const fallbackText = await file.text();
           newDocs.push({
@@ -474,7 +772,7 @@ export default function App() {
             format: 'txt',
             content: fallbackText
               .split('\n')
-              .map((line) => `<p>${line || '&nbsp;'}</p>`)
+              .map((line) => `<p style="margin-bottom: 6px; line-height: 1.4;">${line || '&nbsp;'}</p>`)
               .join(''),
             isDirty: false,
             createdAt: Date.now(),
@@ -495,6 +793,10 @@ export default function App() {
           // ignore
         }
       }
+    }
+
+    if (Object.keys(newMissingMap).length > 0) {
+      setMissingFontsByDoc((prev) => ({ ...prev, ...newMissingMap }));
     }
 
     if (newDocs.length > 0) {
@@ -581,14 +883,25 @@ export default function App() {
     if (!activeDoc) return;
     const titleWithoutExt = activeDoc.title.replace(/\.[^/.]+$/, '');
 
-    if (format === 'docx') {
+    if (
+      format === 'docx' ||
+      format === 'docm' ||
+      format === 'dotx' ||
+      format === 'dotm' ||
+      format === 'doc' ||
+      format === 'dot' ||
+      format === 'odt'
+    ) {
       const blob = await generateDocxBlob(activeDoc.content, activeDoc.title);
-      downloadBlob(blob, `${titleWithoutExt}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    } else if (format === 'rtf') {
+      const ext = format === 'odt' ? 'odt' : format === 'doc' ? 'doc' : format === 'dot' ? 'dot' : format === 'docm' ? 'docm' : format === 'dotx' ? 'dotx' : 'docx';
+      const mime = format === 'odt' ? 'application/vnd.oasis.opendocument.text' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      downloadBlob(blob, `${titleWithoutExt}.${ext}`, mime);
+    } else if (format === 'rtf' || format === 'rtx') {
       const rtfString = serializeHtmlToRtf(activeDoc.content, activeDoc.title);
       const blob = new Blob([rtfString], { type: 'application/rtf;charset=utf-8' });
-      downloadBlob(blob, `${titleWithoutExt}.rtf`, 'application/rtf');
-    } else if (format === 'html') {
+      const ext = format === 'rtx' ? 'rtx' : 'rtf';
+      downloadBlob(blob, `${titleWithoutExt}.${ext}`, 'application/rtf');
+    } else if (format === 'html' || format === 'htm') {
       const fullHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -689,12 +1002,12 @@ ${activeDoc.content}
       onDragOver={handleDragOver}
       className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-800"
     >
-      {/* Hidden File Picker for Batch Open supporting .docx, .rtf, .txt, .html, .md */}
+      {/* Hidden File Picker for Batch Open supporting all Word formats */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".docx,.rtf,.txt,.html,.md,application/rtf,text/rtf,text/richtext,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,*/*"
+        accept=".docx,.docm,.dotx,.dotm,.doc,.dot,.rtf,.rtx,.odt,.txt,.html,.htm,.mht,.mhtml,.xml,.md,.markdown,.pdf,application/rtf,text/rtf,text/richtext,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.oasis.opendocument.text,*/*"
         onChange={(e) => e.target.files && handleFilesSelected(e.target.files)}
         className="hidden"
       />
@@ -720,6 +1033,11 @@ ${activeDoc.content}
             setSecondaryTabId(documents.find((d) => d.id !== activeTabId)?.id || documents[0].id);
           }
         }}
+        onProofread={() => handleRunProofread()}
+        isProofreading={isProofreading}
+        proofreadCount={activeDocSuggestions.length}
+        hasActiveProofreadMarks={hasActiveProofreadMarks}
+        proofreadLanguage={proofreadLanguage}
       />
 
       {/* Document Tabs Bar */}
@@ -774,6 +1092,13 @@ ${activeDoc.content}
         isVirtualKeyboardOpen={isVirtualKeyboardOpen}
         onToggleVirtualKeyboard={() => setIsVirtualKeyboardOpen(!isVirtualKeyboardOpen)}
         onFixEncoding={handleFixEncoding}
+        missingFontsCount={activeDocMissingFonts.length}
+        onOpenMissingFontsModal={() => setIsMissingFontsModalOpen(true)}
+        onProofread={() => handleRunProofread()}
+        isProofreading={isProofreading}
+        proofreadCount={activeDocSuggestions.length}
+        onAcceptAllProofread={handleAcceptAllProofread}
+        onClearProofread={handleClearProofreadHighlights}
       />
 
       {/* Find and Replace bar */}
@@ -811,6 +1136,16 @@ ${activeDoc.content}
         </div>
       )}
 
+      {/* Missing Document Fonts Warning Banner */}
+      {activeDocMissingFonts.length > 0 && (
+        <MissingFontsBanner
+          missingFonts={activeDocMissingFonts}
+          onOpenModal={() => setIsMissingFontsModalOpen(true)}
+          onDismiss={handleDismissMissingFontsWarning}
+          onApplySuggestions={handleAutoApplyAllSuggestions}
+        />
+      )}
+
       {/* Optional Document Ruler */}
       {activeDoc.pageSettings.showRuler && (
         <DocumentRuler
@@ -833,7 +1168,28 @@ ${activeDoc.content}
           onChange={handleContentChange}
           pageSettings={activeDoc.pageSettings}
           editorRef={editorRef}
+          onAcceptProofread={handleAcceptProofreadSuggestion}
+          onDismissProofread={handleDismissProofreadSuggestion}
         />
+
+        {/* Floating AI Proofreader Bar */}
+        {showProofreadBar && (
+          <ProofreadFloatingBar
+            totalSuggestions={activeDocSuggestions.length}
+            currentIndex={activeDocSuggestionIndex}
+            onNext={() => handleCycleProofread('next')}
+            onPrev={() => handleCycleProofread('prev')}
+            onAcceptAll={handleAcceptAllProofread}
+            onClearAll={handleClearProofreadHighlights}
+            selectedLanguage={proofreadLanguage}
+            onSelectLanguage={(lang) => {
+              setProofreadLanguage(lang);
+              handleRunProofread(lang);
+            }}
+            onRunProofread={() => handleRunProofread()}
+            isProofreading={isProofreading}
+          />
+        )}
 
         {/* Secondary Canvas if Split View is Active */}
         {isSplitView && secondaryDoc && (
@@ -929,6 +1285,16 @@ ${activeDoc.content}
         onExport={handleExport}
         onPrintPdf={handlePrint}
         currentLang={currentLang}
+      />
+
+      {/* Missing Fonts Replacement Modal */}
+      <MissingFontsModal
+        isOpen={isMissingFontsModalOpen}
+        onClose={() => setIsMissingFontsModalOpen(false)}
+        documentTitle={activeDoc.title}
+        missingFonts={activeDocMissingFonts.length > 0 ? activeDocMissingFonts : (missingFontsByDoc[activeDoc.id] || [])}
+        onApplyReplacements={handleApplyFontReplacements}
+        onKeepOriginals={handleKeepOriginals}
       />
     </div>
   );

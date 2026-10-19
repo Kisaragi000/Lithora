@@ -76,6 +76,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       icon: <FileCode className="w-5 h-5 text-slate-600" />,
     },
     {
+      id: 'odt',
+      title: 'OpenDocument Text (.odt)',
+      ext: '.odt',
+      desc: 'OASIS OpenDocument format fully compatible with Word and LibreOffice',
+      badge: 'ODT',
+      icon: <FileText className="w-5 h-5 text-indigo-600" />,
+    },
+    {
+      id: 'doc',
+      title: 'Word 97-2003 Document (.doc)',
+      ext: '.doc',
+      desc: 'Legacy Microsoft Word binary format for older enterprise systems',
+      badge: 'DOC',
+      icon: <FileText className="w-5 h-5 text-sky-700" />,
+    },
+    {
       id: 'md',
       title: t.exportAsMd,
       ext: '.md',

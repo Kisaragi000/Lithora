@@ -39,9 +39,14 @@ import {
   Trash2,
   FileCode,
   Code,
+  AlertTriangle,
+  Columns2,
+  Columns3,
 } from 'lucide-react';
 import { Language, PageSettings, CloudSnapshot, DocumentFormat } from '../../types/document';
 import { translations } from '../../i18n/translations';
+import { GoogleFontsModal } from '../Modals/GoogleFontsModal';
+import { loadGoogleFont } from '../../services/googleFontsService';
 
 interface RibbonBarProps {
   currentLang: Language;
@@ -57,7 +62,7 @@ interface RibbonBarProps {
   onOpenExportModal: () => void;
   onOpenFiles: () => void;
   onNewDocFormat: (format: 'docx' | 'rtf') => void;
-  onLoadSample: (type: 'en' | 'hy' | 'ru') => void;
+  onLoadSample: (type: 'en' | 'hy' | 'ru' | 'fonts' | 'proofread') => void;
   onSave: () => void;
   onPrint: () => void;
   // Cloud Sync
@@ -77,6 +82,14 @@ interface RibbonBarProps {
   isVirtualKeyboardOpen: boolean;
   onToggleVirtualKeyboard: () => void;
   onFixEncoding?: () => void;
+  missingFontsCount?: number;
+  onOpenMissingFontsModal?: () => void;
+  // AI Proofreading
+  onProofread?: () => void;
+  isProofreading?: boolean;
+  proofreadCount?: number;
+  onAcceptAllProofread?: () => void;
+  onClearProofread?: () => void;
 }
 
 export const RibbonBar: React.FC<RibbonBarProps> = ({
@@ -110,6 +123,13 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   isVirtualKeyboardOpen,
   onToggleVirtualKeyboard,
   onFixEncoding,
+  missingFontsCount = 0,
+  onOpenMissingFontsModal,
+  onProofread,
+  isProofreading = false,
+  proofreadCount = 0,
+  onAcceptAllProofread,
+  onClearProofread,
 }) => {
   const t = translations[currentLang];
   const [activeRibbonTab, setActiveRibbonTab] = useState<'home' | 'insert' | 'layout' | 'review' | 'cloud' | 'file' | 'export'>('home');
@@ -118,18 +138,8 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   const [hiliteColor, setHiliteColor] = useState('#fef08a');
   const [selectedFont, setSelectedFont] = useState('Calibri');
   const [selectedFontSize, setSelectedFontSize] = useState('3');
-
-  const fonts = [
-    { label: 'Calibri', value: 'Calibri, sans-serif' },
-    { label: 'Times New Roman', value: '"Times New Roman", serif' },
-    { label: 'Arial', value: 'Arial, sans-serif' },
-    { label: 'Georgia', value: 'Georgia, serif' },
-    { label: 'Garamond', value: 'Garamond, serif' },
-    { label: 'Sylfaen (Armenian)', value: 'Sylfaen, serif' },
-    { label: 'Noto Sans Armenian (Հայերեն)', value: '"Noto Sans Armenian", sans-serif' },
-    { label: 'Arial AMU (Հայերեն)', value: '"Arial AMU", sans-serif' },
-    { label: 'Courier New', value: '"Courier New", monospace' },
-  ];
+  const [isGoogleFontsModalOpen, setIsGoogleFontsModalOpen] = useState(false);
+  const [recentFonts, setRecentFonts] = useState<string[]>(['Plus Jakarta Sans', 'Montserrat', 'Playfair Display']);
 
   const fontSizes = [
     { label: '10 pt', value: '1' },
@@ -142,8 +152,25 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
   ];
 
   const handleFontChange = (val: string) => {
+    if (val === '__browse_google_fonts__') {
+      setIsGoogleFontsModalOpen(true);
+      return;
+    }
     setSelectedFont(val);
+    loadGoogleFont(val);
     onCommand('fontName', val);
+    if (!recentFonts.includes(val)) {
+      setRecentFonts((prev) => [val, ...prev.slice(0, 7)]);
+    }
+  };
+
+  const handleSelectFromModal = (fontFamily: string) => {
+    setSelectedFont(fontFamily);
+    loadGoogleFont(fontFamily);
+    onCommand('fontName', fontFamily);
+    if (!recentFonts.includes(fontFamily)) {
+      setRecentFonts((prev) => [fontFamily, ...prev.slice(0, 7)]);
+    }
   };
 
   const handleFontSizeChange = (val: string) => {
@@ -352,6 +379,22 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
                 >
                   English (.docx)
                 </button>
+                <button
+                  onClick={() => onLoadSample('fonts')}
+                  className="px-2 py-1 text-xs bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 rounded transition-colors font-semibold flex items-center gap-1"
+                  title="Open sample document containing Aptos and proprietary fonts to test missing font detection and replacement"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  <span>Aptos/Fonts (.docx)</span>
+                </button>
+                <button
+                  onClick={() => onLoadSample('proofread')}
+                  className="px-2 py-1 text-xs bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100 rounded transition-colors font-semibold flex items-center gap-1"
+                  title="Open tri-lingual proofreading test document to test local AI proofreading for EN, RU, and ARM"
+                >
+                  <Sparkles className="w-3 h-3 text-purple-600" />
+                  <span>Proofread Sample (EN·RU·ARM)</span>
+                </button>
               </div>
             </div>
           </div>
@@ -378,20 +421,117 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
               </button>
             </div>
 
-            {/* Font Family & Size */}
+            {/* Font Family, Google Fonts Picker & Size */}
             <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200">
               <select
                 value={selectedFont}
                 onChange={(e) => handleFontChange(e.target.value)}
-                className="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-800 focus:ring-1 focus:ring-blue-500 max-w-[140px]"
+                className="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-800 focus:ring-1 focus:ring-blue-500 max-w-[155px] font-medium"
                 title={t.fontFamily}
               >
-                {fonts.map((f) => (
-                  <option key={f.label} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
+                {recentFonts.length > 0 && (
+                  <optgroup label="🕒 Recent & Custom">
+                    {recentFonts.map((f) => (
+                      <option key={`recent-${f}`} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+
+                <optgroup label="🇦🇲 Armenian Fonts (Հայերեն)">
+                  <option value="Noto Sans Armenian">Noto Sans Armenian</option>
+                  <option value="Noto Serif Armenian">Noto Serif Armenian</option>
+                  <option value="Sylfaen">Sylfaen (Universal)</option>
+                  <option value="Arev">Arev Armenian</option>
+                  <option value="Arial AMU">Arial AMU</option>
+                </optgroup>
+
+                <optgroup label="✨ Google Fonts - Sans Serif">
+                  <option value="Sora">Sora (Lithora Font)</option>
+                  <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Open Sans">Open Sans</option>
+                  <option value="Montserrat">Montserrat</option>
+                  <option value="Inter">Inter</option>
+                  <option value="Outfit">Outfit</option>
+                  <option value="Manrope">Manrope</option>
+                  <option value="Lato">Lato</option>
+                  <option value="Poppins">Poppins</option>
+                  <option value="Nunito">Nunito</option>
+                  <option value="Raleway">Raleway</option>
+                  <option value="Rubik">Rubik</option>
+                  <option value="Oswald">Oswald</option>
+                  <option value="Ubuntu">Ubuntu</option>
+                  <option value="Fira Sans">Fira Sans</option>
+                </optgroup>
+
+                <optgroup label="✨ Google Fonts - Serif">
+                  <option value="Playfair Display">Playfair Display</option>
+                  <option value="Merriweather">Merriweather</option>
+                  <option value="Lora">Lora</option>
+                  <option value="PT Serif">PT Serif</option>
+                  <option value="EB Garamond">EB Garamond</option>
+                  <option value="Cormorant Garamond">Cormorant Garamond</option>
+                  <option value="Cinzel">Cinzel</option>
+                  <option value="Libre Baskerville">Libre Baskerville</option>
+                  <option value="Spectral">Spectral</option>
+                </optgroup>
+
+                <optgroup label="✨ Google Fonts - Monospace">
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Roboto Mono">Roboto Mono</option>
+                  <option value="Fira Code">Fira Code</option>
+                  <option value="Source Code Pro">Source Code Pro</option>
+                  <option value="Space Mono">Space Mono</option>
+                </optgroup>
+
+                <optgroup label="✨ Google Fonts - Display & Script">
+                  <option value="Caveat">Caveat (Handwriting)</option>
+                  <option value="Comfortaa">Comfortaa (Rounded)</option>
+                  <option value="Pacifico">Pacifico</option>
+                  <option value="Dancing Script">Dancing Script</option>
+                  <option value="Lobster">Lobster</option>
+                  <option value="Bebas Neue">Bebas Neue</option>
+                </optgroup>
+
+                <optgroup label="🖥️ Classic Office Fonts">
+                  <option value="Calibri">Calibri</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Garamond">Garamond</option>
+                  <option value="Courier New">Courier New</option>
+                  <option value="Verdana">Verdana</option>
+                </optgroup>
+
+                <option value="__browse_google_fonts__" className="font-bold text-blue-600 bg-blue-50">
+                  ✨ + Browse 100+ Google Fonts...
+                </option>
               </select>
+
+              {/* Direct Google Fonts Dialog button */}
+              <button
+                type="button"
+                onClick={() => setIsGoogleFontsModalOpen(true)}
+                className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 text-blue-700 text-xs font-semibold rounded border border-blue-200/80 transition-all shadow-2xs hover:shadow-xs shrink-0"
+                title="Browse & Search 100+ Google Fonts"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                <span className="hidden sm:inline">Fonts</span>
+              </button>
+
+              {missingFontsCount > 0 && onOpenMissingFontsModal && (
+                <button
+                  type="button"
+                  onClick={onOpenMissingFontsModal}
+                  className="flex items-center gap-1 px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded border border-amber-300 transition-all shadow-2xs shrink-0"
+                  title={`${missingFontsCount} missing fonts in this document. Click to review replacement suggestions.`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  <span className="hidden md:inline">{missingFontsCount} Missing</span>
+                </button>
+              )}
 
               <select
                 value={selectedFontSize}
@@ -716,6 +856,55 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
               </select>
             </div>
 
+            {/* Multi-Columns Selector */}
+            <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200">
+              <span className="text-slate-500 font-medium">Columns:</span>
+              <button
+                type="button"
+                onClick={() => onCommand('insertHTML', '<div class="doc-columns" style="column-count: 2; column-gap: 24px; -webkit-column-count: 2;"><p>Left column text...</p><p>Right column text...</p></div><p><br></p>')}
+                className="flex items-center gap-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 transition-colors"
+                title="Format into 2 Columns"
+              >
+                <Columns2 className="w-3.5 h-3.5 text-blue-600" />
+                <span>2 Col</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onCommand('insertHTML', '<div class="doc-columns" style="column-count: 3; column-gap: 20px; -webkit-column-count: 3;"><p>Col 1...</p><p>Col 2...</p><p>Col 3...</p></div><p><br></p>')}
+                className="flex items-center gap-1 px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 transition-colors"
+                title="Format into 3 Columns"
+              >
+                <Columns3 className="w-3.5 h-3.5 text-purple-600" />
+                <span>3 Col</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onCommand('insertHTML', '<div class="column-break" style="break-after: column; -webkit-column-break-after: always;"></div>')}
+                className="px-1.5 py-1 text-[11px] bg-slate-100 hover:bg-slate-200 rounded text-slate-600 transition-colors"
+                title="Insert Column Break"
+              >
+                Break
+              </button>
+            </div>
+
+            {/* Line Spacing */}
+            <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200">
+              <span className="text-slate-500 font-medium">Line Spacing:</span>
+              <select
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onCommand('insertHTML', `<div style="line-height: ${val};">${window.getSelection()?.toString() || 'Selected text line spacing'}</div>`);
+                }}
+                defaultValue="1.4"
+                className="border border-slate-300 rounded px-2 py-1 bg-white text-slate-800"
+              >
+                <option value="1.0">1.0 Single</option>
+                <option value="1.15">1.15 Normal</option>
+                <option value="1.5">1.5 Lines</option>
+                <option value="2.0">2.0 Double</option>
+              </select>
+            </div>
+
             {/* Toggle Ruler */}
             <button
               onClick={() => onUpdatePageSettings({ showRuler: !pageSettings.showRuler })}
@@ -778,6 +967,44 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
               >
                 <Sparkles className="w-4 h-4 text-amber-600" />
                 <span>Fix Russian Encoding (CP1251)</span>
+              </button>
+            )}
+
+            <div className="h-4 w-px bg-slate-200 mx-1" />
+
+            {/* AI Proofreader in Review Tab */}
+            {onProofread && (
+              <button
+                onClick={onProofread}
+                disabled={isProofreading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 font-semibold transition-colors"
+                title="Proofread active document locally for English, Russian, and Armenian"
+              >
+                <Sparkles className={`w-4 h-4 text-purple-700 ${isProofreading ? 'animate-spin' : ''}`} />
+                <span>Local AI Proofread (EN·RU·ARM)</span>
+                {proofreadCount !== undefined && proofreadCount > 0 && (
+                  <span className="px-1.5 py-0.2 text-[10px] bg-purple-600 text-white font-bold rounded-full">
+                    {proofreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {proofreadCount !== undefined && proofreadCount > 0 && onAcceptAllProofread && (
+              <button
+                onClick={onAcceptAllProofread}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors"
+              >
+                <span>Accept All ({proofreadCount})</span>
+              </button>
+            )}
+
+            {proofreadCount !== undefined && proofreadCount > 0 && onClearProofread && (
+              <button
+                onClick={onClearProofread}
+                className="px-2 py-1.5 rounded-md text-slate-600 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+              >
+                <span>Clear Highlights</span>
               </button>
             )}
           </div>
@@ -898,6 +1125,15 @@ export const RibbonBar: React.FC<RibbonBarProps> = ({
           </div>
         )}
       </div>
+
+      {/* Google Fonts Library Modal */}
+      <GoogleFontsModal
+        isOpen={isGoogleFontsModalOpen}
+        onClose={() => setIsGoogleFontsModalOpen(false)}
+        currentFont={selectedFont}
+        onSelectFont={handleSelectFromModal}
+        currentLang={currentLang}
+      />
     </div>
   );
 };
