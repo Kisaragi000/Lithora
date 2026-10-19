@@ -51,7 +51,6 @@ jobs:
           releaseName: Lithora ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseBody: |
             Download the installer for your system below.
-            Windows: Lithora_*_x64-setup.exe. Linux: the .deb (Ubuntu, Debian, Mint) or the .AppImage (any distribution).
-            The document engine needs LibreOffice installed: https://www.libreoffice.org/download/
+            Windows: Lithora_*_x64-setup.exe. Linux: the .deb (Ubuntu, Debian, Mint), the .rpm (Fedora, openSUSE) or the .AppImage (any distribution). Nothing else needs to be installed.
           releaseDraft: true
           prerelease: true

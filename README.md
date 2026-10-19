@@ -22,9 +22,9 @@ Download the installer from the [Releases](https://github.com/Kisaragi000/Lithor
 - **Linux:** the `.deb` (Ubuntu, Debian, Mint), the `.rpm` (Fedora, openSUSE) or the
   `.AppImage` (any distribution; make it executable and run it).
 
-Lithora uses [LibreOffice](https://www.libreoffice.org/download/) to lay out and edit pages,
-so install LibreOffice too. In the app, press **Ctrl+Shift+E** to switch to the LibreOffice
-engine view.
+Lithora is self-contained: nothing else needs to be installed. In the app, press
+**Ctrl+Shift+E** to switch to the new document view, where Lithora's own engine lays out and
+edits the pages.
 
 ## Features today
 
@@ -39,8 +39,11 @@ engine view.
 ## Roadmap
 
 Lithora keeps its React interface and runs as a native desktop app with
-[Tauri](https://tauri.app). LibreOffice (through LibreOfficeKit) lays out, draws and saves
-documents, so Word files keep their columns, spacing and placement.
+[Tauri](https://tauri.app). Its document engine is built on the Rust crates of
+[WordCraft](https://github.com/storytold/wordcraft) (MIT OR Apache-2.0), which read and write
+.docx, .rtf and .odt, lay out pages and export PDF. Lithora adds its own interface and
+Armenian and Russian support on top. Code from [LibreOffice](https://www.libreoffice.org)
+(MPL-2.0) may be borrowed file by file where it helps fidelity.
 
 ## Getting started
 
@@ -75,6 +78,8 @@ Windows and Linux installers and attaches them to a draft release.
 | `src/services/` | Parsers and writers for .docx, .rtf, .doc, .odt and Word XML |
 | `src/i18n/` | Interface translations |
 | `src-tauri/` | The Tauri desktop shell (Rust) |
+| `src-tauri/src/engine/` | The document engine bridge: open, draw, edit and save pages |
+| `third-party/` | Licenses and notices of bundled third-party code and fonts |
 | `public/` | Logo and static assets |
 
 ## License
@@ -88,3 +93,6 @@ at your option.
 
 Unless you explicitly state otherwise, any contribution you submit for inclusion in Lithora
 shall be dual licensed as above, without any additional terms or conditions.
+
+Lithora includes third-party code and fonts under their own licenses; see
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
