@@ -37,18 +37,3 @@ export function listenForFileDrops({ onHover, onDrop }: FileDropHandlers): () =>
     unlisten?.();
   };
 }
-
-/** Reads dropped files from disk so the editor can open them like picked files. */
-export async function readDroppedFiles(paths: string[]): Promise<File[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const files: File[] = [];
-  for (const path of paths) {
-    try {
-      const bytes = await invoke<ArrayBuffer>('read_dropped_file', { path });
-      files.push(new File([bytes], path.split(/[\\/]/).pop() ?? path));
-    } catch (e) {
-      console.error('Could not read dropped file', path, e);
-    }
-  }
-  return files;
-}

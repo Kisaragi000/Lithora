@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.2.1"
+version = "0.2.2"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -28,6 +28,7 @@ tauri-plugin-dialog = "2"
 # https://github.com/storytold/wordcraft. Pinned to a reviewed commit.
 wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "117aea31a8e61bd3e306e9210800cdc42897e3c1" }
 sys-locale = "0.3"
+tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

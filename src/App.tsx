@@ -38,8 +38,6 @@ import {
   persistDocuments,
 } from './services/cloudSyncService';
 import { Header } from './components/Header';
-import { DropOverlay } from './components/DropOverlay';
-import { listenForFileDrops, readDroppedFiles } from './desktop/fileDrop';
 import { DocumentTabsBar } from './components/Tabs/DocumentTabsBar';
 import { RibbonBar } from './components/Ribbon/RibbonBar';
 import { DocumentRuler } from './components/Editor/DocumentRuler';
@@ -782,22 +780,6 @@ export default function App() {
     e.stopPropagation();
   };
 
-  // In the desktop app, files dropped onto the window arrive as paths.
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const openFilesRef = useRef(handleFilesSelected);
-  openFilesRef.current = handleFilesSelected;
-  useEffect(
-    () =>
-      listenForFileDrops({
-        onHover: setIsDraggingFiles,
-        onDrop: async (paths) => {
-          const files = await readDroppedFiles(paths);
-          if (files.length > 0) await openFilesRef.current(files);
-        },
-      }),
-    []
-  );
-
   // Insert Table
   const handleInsertTable = (rows: number, cols: number) => {
     let tableHtml = '<table style="width:100%; border-collapse:collapse; margin:1rem 0;">';
@@ -1160,8 +1142,6 @@ ${activeDoc.content}
         onZoomChange={(zoom) => handleUpdatePageSettings({ zoom })}
         isDirty={activeDoc.isDirty}
       />
-
-      {isDraggingFiles && <DropOverlay label={translations[currentLang].dropToOpen} />}
 
       {/* Dialog Modals */}
       <InsertTableModal
