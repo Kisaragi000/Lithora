@@ -3,7 +3,6 @@ import {
   DocumentTab,
   Language,
   DocumentStats,
-  CloudSnapshot,
   DocumentFormat,
   PageSettings,
 } from './types/document';
@@ -37,13 +36,10 @@ import { MissingFontsBanner } from './components/Editor/MissingFontsBanner';
 import {
   loadPersistedDocuments,
   persistDocuments,
-  getCloudSnapshots,
-  saveCloudSnapshot,
-  deleteCloudSnapshot,
-  exportCloudBackupJson,
-  importCloudBackupJson,
 } from './services/cloudSyncService';
 import { Header } from './components/Header';
+import { DropOverlay } from './components/DropOverlay';
+import { listenForFileDrops, readDroppedFiles } from './desktop/fileDrop';
 import { DocumentTabsBar } from './components/Tabs/DocumentTabsBar';
 import { RibbonBar } from './components/Ribbon/RibbonBar';
 import { DocumentRuler } from './components/Editor/DocumentRuler';
@@ -56,7 +52,6 @@ import { ExportModal } from './components/Modals/ExportModal';
 import { FindReplaceBar } from './components/Panels/FindReplaceBar';
 import { DocumentOutlinePanel } from './components/Panels/DocumentOutlinePanel';
 import { VirtualKeyboardHelper } from './components/Panels/VirtualKeyboardHelper';
-import { CloudRevisionDrawer } from './components/Panels/CloudRevisionDrawer';
 import { preloadPopularGoogleFonts } from './services/googleFontsService';
 
 export default function App() {
@@ -89,16 +84,11 @@ export default function App() {
   const activeDoc = documents.find((d) => d.id === activeTabId) || documents[0] || sampleRussianDoc;
   const secondaryDoc = documents.find((d) => d.id === secondaryTabId) || documents[1] || documents[0];
 
-  // Cloud Snapshots
-  const [cloudSnapshots, setCloudSnapshots] = useState<CloudSnapshot[]>(() => getCloudSnapshots());
-  const [isSyncing, setIsSyncing] = useState(false);
-
   // Modals state
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [isSymbolsModalOpen, setIsSymbolsModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isRevisionDrawerOpen, setIsRevisionDrawerOpen] = useState(false);
 
   // Missing Fonts detection & replacement state
   const [missingFontsByDoc, setMissingFontsByDoc] = useState<Record<string, MissingFontReport[]>>({});
@@ -207,22 +197,11 @@ export default function App() {
     updateContentStatsAndHeadings(newHtml);
   };
 
-  // Cloud Autosave debounced effect (every 5 seconds)
+  // Autosave: open tabs are kept on this computer, so mark them saved after 5 seconds without changes.
   useEffect(() => {
     if (!activeDoc || !activeDoc.isDirty) return;
 
     const timer = setTimeout(() => {
-      setIsSyncing(true);
-      // Auto-save snapshot quietly in background
-      saveCloudSnapshot({
-        documentId: activeDoc.id,
-        documentTitle: activeDoc.title,
-        content: activeDoc.content,
-        wordCount: stats.words,
-        format: activeDoc.format,
-        source: 'auto',
-      });
-
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === activeDoc.id
@@ -235,27 +214,14 @@ export default function App() {
             : doc
         )
       );
-
-      setCloudSnapshots(getCloudSnapshots());
-      setIsSyncing(false);
     }, 5000);
 
     return () => clearTimeout(timer);
   }, [activeDoc?.content, activeDoc?.isDirty, activeDoc?.id, stats.words]);
 
-  // Manual Save (Cloud Snapshot + local)
+  // Manual save: open tabs are kept on this computer.
   const handleSaveNow = () => {
     if (!activeDoc) return;
-    setIsSyncing(true);
-
-    saveCloudSnapshot({
-      documentId: activeDoc.id,
-      documentTitle: activeDoc.title,
-      content: activeDoc.content,
-      wordCount: stats.words,
-      format: activeDoc.format,
-      source: 'manual',
-    });
 
     setDocuments((prev) =>
       prev.map((doc) =>
@@ -269,9 +235,6 @@ export default function App() {
           : doc
       )
     );
-
-    setCloudSnapshots(getCloudSnapshots());
-    setIsSyncing(false);
   };
 
   // Quick Direct Save to Disk (.docx or .rtf depending on current document format)
@@ -819,6 +782,22 @@ export default function App() {
     e.stopPropagation();
   };
 
+  // In the desktop app, files dropped onto the window arrive as paths.
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const openFilesRef = useRef(handleFilesSelected);
+  openFilesRef.current = handleFilesSelected;
+  useEffect(
+    () =>
+      listenForFileDrops({
+        onHover: setIsDraggingFiles,
+        onDrop: async (paths) => {
+          const files = await readDroppedFiles(paths);
+          if (files.length > 0) await openFilesRef.current(files);
+        },
+      }),
+    []
+  );
+
   // Insert Table
   const handleInsertTable = (rows: number, cols: number) => {
     let tableHtml = '<table style="width:100%; border-collapse:collapse; margin:1rem 0;">';
@@ -952,50 +931,6 @@ ${activeDoc.content}
     window.print();
   };
 
-  // Snapshot restoration
-  const handleRestoreSnapshot = (snapshot: CloudSnapshot) => {
-    if (editorRef.current) {
-      editorRef.current.innerHTML = snapshot.content;
-    }
-    handleContentChange(snapshot.content);
-    setIsRevisionDrawerOpen(false);
-  };
-
-  const handleDeleteSnapshot = (id: string) => {
-    deleteCloudSnapshot(id);
-    setCloudSnapshots(getCloudSnapshots());
-  };
-
-  // Cloud Backup Export/Import
-  const handleExportCloudBackup = () => {
-    const json = exportCloudBackupJson(documents);
-    const blob = new Blob([json], { type: 'application/json' });
-    downloadBlob(blob, `lithora_workspace_backup_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
-  };
-
-  const handleImportCloudBackup = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e: any) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        const text = await file.text();
-        try {
-          const result = importCloudBackupJson(text);
-          setDocuments(result.documents);
-          setCloudSnapshots(result.snapshots);
-          if (result.documents.length > 0) {
-            setActiveTabId(result.documents[0].id);
-          }
-        } catch (err: any) {
-          alert('Failed to import backup: ' + err.message);
-        }
-      }
-    };
-    input.click();
-  };
-
   return (
     <div
       onDrop={handleDrop}
@@ -1018,8 +953,6 @@ ${activeDoc.content}
         onLanguageChange={setCurrentLang}
         activeDocTitle={activeDoc.title}
         onTitleChange={handleTitleChange}
-        cloudSyncStatus={activeDoc.cloudSyncStatus}
-        lastSaved={activeDoc.lastSaved}
         activeFormat={activeDoc.format}
         onSave={handleSaveNow}
         onDirectDownload={handleDirectDownloadCurrentFormat}
@@ -1067,24 +1000,6 @@ ${activeDoc.content}
         onLoadSample={handleLoadSample}
         onSave={handleSaveNow}
         onPrint={handlePrint}
-        cloudSnapshots={cloudSnapshots}
-        onSaveSnapshot={(label) => {
-          saveCloudSnapshot({
-            documentId: activeDoc.id,
-            documentTitle: activeDoc.title,
-            content: activeDoc.content,
-            wordCount: stats.words,
-            format: activeDoc.format,
-            source: 'manual',
-          });
-          setCloudSnapshots(getCloudSnapshots());
-        }}
-        onRestoreSnapshot={handleRestoreSnapshot}
-        onDeleteSnapshot={handleDeleteSnapshot}
-        onExportCloudBackup={handleExportCloudBackup}
-        onImportCloudBackup={handleImportCloudBackup}
-        onManualSync={handleSaveNow}
-        isSyncing={isSyncing}
         isFindReplaceOpen={isFindReplaceOpen}
         onToggleFindReplace={() => setIsFindReplaceOpen(!isFindReplaceOpen)}
         isOutlineOpen={isOutlineOpen}
@@ -1246,15 +1161,7 @@ ${activeDoc.content}
         isDirty={activeDoc.isDirty}
       />
 
-      {/* Cloud Revision Drawer */}
-      <CloudRevisionDrawer
-        isOpen={isRevisionDrawerOpen}
-        onClose={() => setIsRevisionDrawerOpen(false)}
-        snapshots={cloudSnapshots}
-        onRestore={handleRestoreSnapshot}
-        onDelete={handleDeleteSnapshot}
-        currentLang={currentLang}
-      />
+      {isDraggingFiles && <DropOverlay label={translations[currentLang].dropToOpen} />}
 
       {/* Dialog Modals */}
       <InsertTableModal

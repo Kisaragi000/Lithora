@@ -1,9 +1,6 @@
 import React from 'react';
 import {
   FileText,
-  CloudCheck,
-  CloudUpload,
-  CloudOff,
   Download,
   Printer,
   Save,
@@ -14,7 +11,7 @@ import {
   ArrowDownToLine,
   Sparkles,
 } from 'lucide-react';
-import { Language, CloudSyncStatus, DocumentFormat } from '../types/document';
+import { Language, DocumentFormat } from '../types/document';
 import { translations } from '../i18n/translations';
 import { LithoraLogo } from './LithoraLogo';
 import { ProofreadLanguage } from '../services/localProofreaderService';
@@ -24,8 +21,6 @@ interface HeaderProps {
   onLanguageChange: (lang: Language) => void;
   activeDocTitle: string;
   onTitleChange: (newTitle: string) => void;
-  cloudSyncStatus: CloudSyncStatus;
-  lastSaved: number;
   activeFormat?: DocumentFormat;
   onSave: () => void;
   onDirectDownload?: () => void;
@@ -47,8 +42,6 @@ export const Header: React.FC<HeaderProps> = ({
   onLanguageChange,
   activeDocTitle,
   onTitleChange,
-  cloudSyncStatus,
-  lastSaved,
   activeFormat = 'docx',
   onSave,
   onDirectDownload,
@@ -64,38 +57,6 @@ export const Header: React.FC<HeaderProps> = ({
   proofreadLanguage = 'auto',
 }) => {
   const t = translations[currentLang];
-
-  const getSyncIcon = () => {
-    switch (cloudSyncStatus) {
-      case 'synced':
-        return <CloudCheck className="w-4 h-4 text-emerald-600" />;
-      case 'syncing':
-        return <CloudUpload className="w-4 h-4 text-blue-600 animate-pulse" />;
-      case 'modified':
-        return <CloudUpload className="w-4 h-4 text-amber-500" />;
-      default:
-        return <CloudOff className="w-4 h-4 text-slate-400" />;
-    }
-  };
-
-  const getSyncLabel = () => {
-    switch (cloudSyncStatus) {
-      case 'synced':
-        return t.synced;
-      case 'syncing':
-        return t.syncing;
-      case 'modified':
-        return t.modified;
-      default:
-        return t.offline;
-    }
-  };
-
-  const formatLastSaved = (ts: number) => {
-    if (!ts) return '';
-    const date = new Date(ts);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
 
   return (
     <header className="flex items-center justify-between gap-4 px-4 py-2.5 bg-white border-b border-slate-200 select-none">
@@ -138,15 +99,6 @@ export const Header: React.FC<HeaderProps> = ({
             title="Click to rename document"
           />
         </div>
-
-        {/* Cloud Sync Status Indicator */}
-        <div
-          className="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded text-xs text-slate-500 bg-slate-50 border border-slate-200/60 shrink-0"
-          title={`${getSyncLabel()} ${lastSaved ? `· ${formatLastSaved(lastSaved)}` : ''}`}
-        >
-          {getSyncIcon()}
-          <span className="font-medium text-slate-600">{getSyncLabel()}</span>
-        </div>
       </div>
 
       {/* Zone 2: Document actions */}
@@ -179,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onSave}
           className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
-          title="Save snapshot to cloud"
+          title="Save changes"
         >
           <Save className="w-3.5 h-3.5 text-slate-600" />
           <span className="hidden sm:inline">{t.saveNow}</span>

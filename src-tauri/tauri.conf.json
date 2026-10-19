@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lithora",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "io.github.kisaragi000.lithora",
   "build": {
     "frontendDist": "../dist",
@@ -18,7 +18,8 @@
         "minWidth": 800,
         "minHeight": 560,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "theme": "Light"
       }
     ],
     "security": {
@@ -55,7 +56,12 @@
           "Russian",
           "Armenian"
         ],
-        "displayLanguageSelector": true
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "sidebarImage": "windows/installer-sidebar.bmp",
+        "headerImage": "windows/installer-header.bmp",
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     },
     "resources": {

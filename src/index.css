@@ -1,8 +1,22 @@
 @import "tailwindcss";
 
 @layer base {
+  /* The app fills the window. The page itself never scrolls or bounces,
+     only the panels inside it do. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  * {
+    overscroll-behavior: none;
   }
 }
 

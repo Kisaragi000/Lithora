@@ -9,6 +9,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { ArrowLeft, Bold, FolderOpen, Italic, Save, Underline } from 'lucide-react';
+import { DropOverlay } from '../components/DropOverlay';
+import { listenForFileDrops } from '../desktop/fileDrop';
 
 interface PageSize {
   width: number;
@@ -176,6 +178,22 @@ export const EnginePreview: React.FC = () => {
     const picked = await openDialog({ multiple: false, filters: [{ name: 'Documents', extensions: OPEN_EXTENSIONS }] });
     if (typeof picked === 'string') await openPath(picked);
   };
+
+  // A document dropped onto the window opens in place of the current one.
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const openPathRef = useRef(openPath);
+  openPathRef.current = openPath;
+  useEffect(
+    () =>
+      listenForFileDrops({
+        onHover: setIsDraggingFiles,
+        onDrop: (paths) => {
+          setError('');
+          void openPathRef.current(paths[0]);
+        },
+      }),
+    []
+  );
 
   // A document passed on the command line opens straight away.
   useEffect(() => {
@@ -369,6 +387,7 @@ export const EnginePreview: React.FC = () => {
           </div>
         )}
       </div>
+      {isDraggingFiles && <DropOverlay label="Drop to open" />}
     </div>
   );
 };
