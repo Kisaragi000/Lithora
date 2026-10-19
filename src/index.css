@@ -223,3 +223,12 @@
     padding: 20mm !important;
   }
 }
+
+/* The cursor in the desktop document view. */
+@keyframes lithora-caret-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+.lithora-caret {
+  animation: lithora-caret-blink 1.06s steps(1) infinite;
+}
