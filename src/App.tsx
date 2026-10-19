@@ -970,7 +970,7 @@ ${activeDoc.content}
   const handleExportCloudBackup = () => {
     const json = exportCloudBackupJson(documents);
     const blob = new Blob([json], { type: 'application/json' });
-    downloadBlob(blob, `wordcraft_workspace_backup_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+    downloadBlob(blob, `lithora_workspace_backup_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
   };
 
   const handleImportCloudBackup = () => {
