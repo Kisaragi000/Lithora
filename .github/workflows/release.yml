@@ -43,6 +43,7 @@ jobs:
       - run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -54,3 +55,20 @@ jobs:
             Windows: Lithora_*_x64-setup.exe. Linux: the .deb (Ubuntu, Debian, Mint), the .rpm (Fedora, openSUSE) or the .AppImage (any distribution). Nothing else needs to be installed.
           releaseDraft: true
           prerelease: true
+
+      # Lithora's "Check for updates" compares its download against these.
+      - name: Attach checksums
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+        run: |
+          cd src-tauri/target/release/bundle
+          name="SHA256SUMS-${{ runner.os }}.txt"
+          find . -type f \( -name '*-setup.exe' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print0 \
+            | xargs -0 sha256sum | sed -E 's#^([0-9a-f]+) [ *]\./(.*/)?#\1  #' > "$name"
+          cat "$name"
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: text/plain" \
+            --data-binary @"$name" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$name" > /dev/null

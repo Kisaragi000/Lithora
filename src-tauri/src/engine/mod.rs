@@ -479,6 +479,35 @@ mod tests {
         assert!(total <= text_width + 2.0, "table {total}pt, text {text_width}pt");
     }
 
+    #[test]
+    fn rtf_row_heights_are_kept_and_saved() {
+        use wordcraft_engine::doc::props::HeightRule;
+        let rtf = r"{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}}
+\trowd\trrh1440\trkeep\cellx3000\cellx9000 a\cell b\cell\row
+\trowd\trrh-400\cellx3000\cellx9000 c\cell d\cell\row
+\pard\par}";
+        let rows = |s: &Session| {
+            s.doc
+                .body
+                .iter()
+                .find_map(|b| match &**b {
+                    Block::Table(t) => Some(t.rows.iter().map(|r| (r.props.height, r.props.height_rule, r.props.cant_split)).collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .expect("a table")
+        };
+        let expected = vec![(Some(72.0), HeightRule::AtLeast, true), (Some(20.0), HeightRule::Exact, false)];
+        let mut s = session_for("rows.rtf", rtf);
+        assert_eq!(rows(&s), expected);
+        let dir = std::env::temp_dir().join(format!("lithora-test-{}-rows", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("rows.rtf");
+        run(&mut s, "file.saveAs", json!({ "path": out.to_string_lossy() })).unwrap();
+        let (doc, _) = wordcraft_engine::io::open_path_in(&out, None, &Region::default()).unwrap();
+        assert_eq!(rows(&Session::new(doc)), expected, "RTF round trip");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Renders every page of $LITHORA_RENDER_FILE to PPM images in $LITHORA_RENDER_OUT.
     #[test]
     #[ignore]

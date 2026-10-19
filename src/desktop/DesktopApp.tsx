@@ -16,6 +16,7 @@ import { DocState, engine, OPEN_EXTENSIONS, SAVE_FILTERS } from './engine';
 import { PageView, PageViewHandle } from './PageView';
 import { Ribbon, RibbonAction } from './Ribbon';
 import { strings } from './strings';
+import { UpdateButton } from './UpdateButton';
 
 const LANGUAGE_KEY = 'lithora_ui_language';
 const ZOOM_KEY = 'lithora_zoom';
@@ -78,6 +79,8 @@ export const DesktopApp: React.FC = () => {
   }, [notice]);
 
   const showError = useCallback((text: string) => setNotice({ text, error: true }), []);
+  const notify = useCallback((text: string, error?: boolean) => setNotice({ text, error }), []);
+  const unsavedNames = useCallback(() => docsRef.current.filter((d) => d.dirty).map((d) => d.name), []);
 
   const updateDoc = useCallback((state: DocState) => {
     setDocs((list) => list.map((d) => (d.id === state.id ? state : d)));
@@ -363,6 +366,8 @@ export const DesktopApp: React.FC = () => {
           >
             <Save className="h-4 w-4" /> {t.save}
           </button>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
+          <UpdateButton t={t} unsavedNames={unsavedNames} notify={notify} />
           <span className="mx-1 h-5 w-px bg-slate-200" />
           <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
             <Globe className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-slate-500" />

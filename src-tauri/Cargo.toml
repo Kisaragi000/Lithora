@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.2.2"
+version = "0.2.3"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -29,6 +29,9 @@ tauri-plugin-dialog = "2"
 wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "117aea31a8e61bd3e306e9210800cdc42897e3c1" }
 sys-locale = "0.3"
 tauri-plugin-clipboard-manager = "2"
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip", "json"] }
+semver = "1"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
@@ -40,3 +43,7 @@ krilla = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1d
 # Optimize dependencies in debug builds too: page layout is slow unoptimized.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Lithora's copy of WordCraft's file import/export, with fixes (see vendor/wordcraft-formats).
+[patch."https://github.com/storytold/wordcraft"]
+wordcraft-formats = { path = "vendor/wordcraft-formats" }
