@@ -1,16 +1,23 @@
 /**
- * Engine preview: LibreOffice draws and edits the pages, React shows them.
+ * Document view: Lithora's engine lays out and draws the pages, React shows them.
  *
- * This is the first test of Lithora's planned architecture. The desktop backend
- * (src-tauri/src/engine) hosts LibreOffice through LibreOfficeKit; this view sends it
- * keys, clicks and commands and paints the page bitmaps it returns.
+ * The desktop backend (src-tauri/src/engine) runs the document engine, built on
+ * WordCraft's Rust crates. This view sends it typing, keys, clicks and commands and
+ * paints the page bitmaps it returns.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { ArrowLeft, Bold, FolderOpen, Italic, Save, Underline } from 'lucide-react';
 
-interface Rect {
+interface PageSize {
+  width: number;
+  height: number;
+}
+
+/** A rectangle on one page, in points from the page's top-left corner. */
+interface Mark {
+  page: number;
   x: number;
   y: number;
   width: number;
@@ -18,39 +25,52 @@ interface Rect {
 }
 
 interface DocState {
-  pages: Rect[];
-  cursor: Rect | null;
-  selection: Rect[];
-  lockedBy: string | null;
+  pages: PageSize[];
+  cursor: Mark | null;
+  selection: Mark[];
+  canUndo: boolean;
+  canRedo: boolean;
+  dirty: boolean;
 }
 
-const TWIPS_PER_INCH = 1440;
+const POINTS_PER_INCH = 72;
 const CSS_DPI = 96;
 
-const OPEN_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt', 'xml', 'htm', 'html', 'mht', 'mhtml', 'txt', 'wps'];
-const SAVE_FORMATS: Record<string, string> = { docx: 'docx', rtf: 'rtf', odt: 'odt', pdf: 'pdf', doc: 'doc', txt: 'txt' };
+const OPEN_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt', 'ott', 'xml', 'htm', 'html', 'md', 'txt'];
+const SAVE_EXTENSIONS = ['docx', 'rtf', 'odt', 'pdf', 'html', 'md', 'txt'];
 
-// Key codes from com/sun/star/awt/Key.idl
-const SPECIAL_KEYS: Record<string, [number, number]> = {
-  Enter: [13, 1280],
-  Backspace: [8, 1283],
-  Delete: [0, 1286],
-  Tab: [9, 1282],
-  Escape: [27, 1281],
-  ArrowDown: [0, 1024],
-  ArrowUp: [0, 1025],
-  ArrowLeft: [0, 1026],
-  ArrowRight: [0, 1027],
-  Home: [0, 1028],
-  End: [0, 1029],
-  PageUp: [0, 1030],
-  PageDown: [0, 1031],
+// Browser key names that differ from the engine's (see WordCraft's keymap).
+const KEY_NAMES: Record<string, string> = {
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ' ': 'Space',
 };
+const NAMED_KEYS = new Set(['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'Space', 'Insert']);
 
-const SHORTCUTS: Record<string, string> = { b: '.uno:Bold', i: '.uno:Italic', u: '.uno:Underline', z: '.uno:Undo', y: '.uno:Redo' };
+/** The engine's name for a key press, such as `Mod+B` or `Shift+Left`, or null for plain typing. */
+function keyCombo(e: React.KeyboardEvent): string | null {
+  const mod = e.ctrlKey || e.metaKey;
+  // AltGr (Ctrl+Alt on Windows) types characters on many keyboard layouts.
+  const altGr = e.ctrlKey && e.altKey && e.key.length === 1;
+  let name = KEY_NAMES[e.key] ?? e.key;
+  const named = NAMED_KEYS.has(name) || /^F([1-9]|1[0-9]|2[0-4])$/.test(name);
+  if (!named) {
+    if (!mod && !e.altKey) return null;
+    if (altGr) return null;
+    // With modifiers, use the physical key so Shift doesn't turn "1" into "!".
+    if (/^Key[A-Z]$/.test(e.code)) name = e.code.slice(3);
+    else if (/^Digit[0-9]$/.test(e.code)) name = e.code.slice(5);
+    else if (name.length === 1) name = name.toUpperCase();
+    else return null;
+  }
+  if (name === 'Space' && !mod && !e.altKey) return null;
+  return `${mod ? 'Mod+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${name}`;
+}
 
-async function renderPage(page: number, dpi: number): Promise<ImageData> {
-  const buf = await invoke<ArrayBuffer>('engine_render_page', { page, dpi });
+async function renderPage(page: number, scale: number): Promise<ImageData> {
+  const buf = await invoke<ArrayBuffer>('engine_render_page', { page, scale });
   const view = new DataView(buf);
   const width = view.getUint32(0, true);
   const height = view.getUint32(4, true);
@@ -69,10 +89,11 @@ export const EnginePreview: React.FC = () => {
   const latest = useRef<DocState | null>(null);
   latest.current = doc;
 
-  const pxPerTwip = (CSS_DPI * zoom) / TWIPS_PER_INCH;
-  const renderDpi = CSS_DPI * zoom * (window.devicePixelRatio || 1);
+  const pxPerPt = (CSS_DPI * zoom) / POINTS_PER_INCH;
+  const renderScale = pxPerPt * (window.devicePixelRatio || 1);
+  const dragging = useRef(false);
 
-  // Edits must reach LibreOffice in the order they were typed.
+  // Edits must reach the engine in the order they were typed.
   const enqueue = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
     const next = queue.current.then(task, task);
     queue.current = next.catch(() => undefined);
@@ -82,7 +103,7 @@ export const EnginePreview: React.FC = () => {
   const paint = useCallback(
     async (pages: number[]) => {
       for (const i of pages) {
-        const image = await renderPage(i, renderDpi);
+        const image = await renderPage(i, renderScale);
         const canvas = canvases.current[i];
         if (!canvas) continue;
         canvas.width = image.width;
@@ -90,7 +111,7 @@ export const EnginePreview: React.FC = () => {
         canvas.getContext('2d')?.putImageData(image, 0, 0);
       }
     },
-    [renderDpi],
+    [renderScale],
   );
 
   // Repaint everything when a document opens or the zoom changes.
@@ -98,20 +119,23 @@ export const EnginePreview: React.FC = () => {
     if (!doc) return;
     enqueue(() => paint(doc.pages.map((_, i) => i))).catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc?.pages.length, renderDpi]);
-
-  const pageAt = (y: number, pages: Rect[]) => Math.max(0, pages.findIndex((p) => y >= p.y && y < p.y + p.height));
+  }, [doc?.pages.length, renderScale]);
 
   const pending = useRef(0);
 
   const afterEdit = async (started: number, before: DocState | null, next: DocState) => {
     if (before && before.pages.length === next.pages.length) {
-      // Repaint the page with the cursor; a change in page count repaints everything instead.
-      const at = next.cursor ? pageAt(next.cursor.y, next.pages) : 0;
-      await paint([at]);
+      // Repaint the pages an edit can touch: the cursor's page and the one after it (text can
+      // flow onto it), plus any selected pages. A change in page count repaints everything.
+      const touched = new Set<number>();
+      const at = next.cursor?.page ?? next.selection[0]?.page ?? 0;
+      touched.add(at);
+      if (at + 1 < next.pages.length) touched.add(at + 1);
+      for (const r of next.selection) touched.add(r.page);
+      await paint([...touched]);
     }
     setDoc(next);
-    setTiming(`${Math.round(performance.now() - started)} ms from key to repainted page`);
+    setTiming(`${Math.round(performance.now() - started)} ms to update the page`);
   };
 
   const run = (action: () => Promise<DocState>) => {
@@ -175,13 +199,15 @@ export const EnginePreview: React.FC = () => {
     });
     if (!target) return;
     const ext = target.split('.').pop()?.toLowerCase() ?? '';
-    const format = SAVE_FORMATS[ext];
-    if (!format) {
-      setError(`Choose a file name ending in ${Object.keys(SAVE_FORMATS).map((e) => '.' + e).join(', ')}`);
+    if (!SAVE_EXTENSIONS.includes(ext)) {
+      setError(`Choose a file name ending in ${SAVE_EXTENSIONS.map((e) => '.' + e).join(', ')}`);
       return;
     }
-    enqueue(() => invoke('engine_save_as', { path: target, format }))
-      .then(() => setTiming(`Saved ${target.split(/[\\/]/).pop()}`))
+    enqueue(() => invoke<DocState>('engine_save_as', { path: target }))
+      .then((state) => {
+        setDoc(state);
+        setTiming(`Saved ${target.split(/[\\/]/).pop()}`);
+      })
       .catch((e) => setError(String(e)));
   };
 
@@ -191,31 +217,52 @@ export const EnginePreview: React.FC = () => {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!doc) return;
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && SHORTCUTS[e.key.toLowerCase()]) {
+    if (!doc || e.nativeEvent.isComposing) return;
+    const combo = keyCombo(e);
+    if (combo) {
       e.preventDefault();
-      command(SHORTCUTS[e.key.toLowerCase()]);
+      run(async () => (await invoke<DocState | null>('engine_key', { key: combo })) ?? latest.current!);
       return;
     }
-    let codes: [number, number] | undefined = SPECIAL_KEYS[e.key];
-    if (!codes && e.key.length <= 2 && !mod && !e.altKey) {
-      const cp = e.key.codePointAt(0);
-      if (cp !== undefined && cp >= 32) codes = [cp, 0];
+    if (e.key.length > 0 && [...e.key].length === 1) {
+      e.preventDefault();
+      const text = e.key;
+      run(() => invoke<DocState>('engine_type', { text }));
     }
-    if (!codes) return;
-    e.preventDefault();
-    const [charCode, keyCode] = codes;
-    run(() => invoke<DocState>('engine_key', { charCode, keyCode }));
   };
 
-  const onPageClick = (e: React.MouseEvent<HTMLCanvasElement>, page: Rect) => {
+  const pointOnPage = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(page.x + (e.clientX - box.left) / pxPerTwip);
-    const y = Math.round(page.y + (e.clientY - box.top) / pxPerTwip);
-    run(() => invoke<DocState>('engine_click', { x, y }));
-    surface.current?.focus();
+    return { x: (e.clientX - box.left) / pxPerPt, y: (e.clientY - box.top) / pxPerPt };
   };
+
+  const onPageMouseDown = (e: React.MouseEvent<HTMLCanvasElement>, page: number) => {
+    e.preventDefault();
+    surface.current?.focus();
+    const { x, y } = pointOnPage(e);
+    if (e.detail === 2) {
+      run(async () => {
+        await invoke<DocState>('engine_click', { page, x, y, extend: false });
+        return invoke<DocState>('engine_command', { command: 'select.word' });
+      });
+      return;
+    }
+    dragging.current = true;
+    run(() => invoke<DocState>('engine_click', { page, x, y, extend: e.shiftKey }));
+  };
+
+  const onPageMouseMove = (e: React.MouseEvent<HTMLCanvasElement>, page: number) => {
+    // Drag to select; skip moves while the engine is still busy with the last one.
+    if (!dragging.current || (e.buttons & 1) === 0 || pending.current > 0) return;
+    const { x, y } = pointOnPage(e);
+    run(() => invoke<DocState>('engine_click', { page, x, y, extend: true }));
+  };
+
+  useEffect(() => {
+    const stop = () => (dragging.current = false);
+    window.addEventListener('mouseup', stop);
+    return () => window.removeEventListener('mouseup', stop);
+  }, []);
 
   const toolButton =
     'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-[#083B69] hover:bg-[#6C9FCB]/20 disabled:opacity-40';
@@ -226,7 +273,7 @@ export const EnginePreview: React.FC = () => {
         <a href="#" className={toolButton} title="Back to the editor">
           <ArrowLeft className="h-4 w-4" />
         </a>
-        <span className="mr-2 font-semibold">Engine preview</span>
+        <span className="mr-2 font-semibold">Document view</span>
         <button className={toolButton} onClick={openFile}>
           <FolderOpen className="h-4 w-4" /> Open
         </button>
@@ -234,13 +281,13 @@ export const EnginePreview: React.FC = () => {
           <Save className="h-4 w-4" /> Save as
         </button>
         <span className="mx-1 h-5 w-px bg-[#6C9FCB]/40" />
-        <button className={toolButton} onClick={() => command('.uno:Bold')} disabled={!doc} title="Bold (Ctrl+B)">
+        <button className={toolButton} onClick={() => command('format.bold')} disabled={!doc} title="Bold (Ctrl+B)">
           <Bold className="h-4 w-4" />
         </button>
-        <button className={toolButton} onClick={() => command('.uno:Italic')} disabled={!doc} title="Italic (Ctrl+I)">
+        <button className={toolButton} onClick={() => command('format.italic')} disabled={!doc} title="Italic (Ctrl+I)">
           <Italic className="h-4 w-4" />
         </button>
-        <button className={toolButton} onClick={() => command('.uno:Underline')} disabled={!doc} title="Underline (Ctrl+U)">
+        <button className={toolButton} onClick={() => command('format.underline')} disabled={!doc} title="Underline (Ctrl+U)">
           <Underline className="h-4 w-4" />
         </button>
         <select
@@ -260,12 +307,6 @@ export const EnginePreview: React.FC = () => {
         </span>
       </header>
 
-      {doc?.lockedBy && (
-        <div className="border-b border-[#B9AEDC] bg-[#B9AEDC]/25 px-4 py-2 text-sm text-[#083B69]">
-          This file is open in another program ({doc.lockedBy}), so it opened read-only. Close it there and open it again to edit.
-        </div>
-      )}
-
       {error && <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">{error}</div>}
 
       <div
@@ -278,7 +319,7 @@ export const EnginePreview: React.FC = () => {
         {!doc && (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <p className="max-w-md text-[#376FA3]">
-              Open a Word, RTF or OpenDocument file. LibreOffice lays out and draws every page; Lithora shows them.
+              Open a Word, RTF or OpenDocument file. Lithora lays out and draws every page itself.
             </p>
             <button className="rounded-md bg-[#376FA3] px-4 py-2 font-medium text-white hover:bg-[#083B69]" onClick={openFile}>
               Open a document
@@ -288,41 +329,37 @@ export const EnginePreview: React.FC = () => {
         {doc && (
           <div className="flex flex-col items-center gap-6 py-6">
             {doc.pages.map((page, i) => {
-              const cursorHere = doc.cursor && doc.cursor.y >= page.y && doc.cursor.y < page.y + page.height ? doc.cursor : null;
+              const cursorHere = doc.cursor?.page === i ? doc.cursor : null;
               return (
                 <div
                   key={i}
                   className="relative bg-white shadow-[0_1px_4px_rgba(8,59,105,0.18)]"
-                  style={{ width: page.width * pxPerTwip, height: page.height * pxPerTwip }}
+                  style={{ width: page.width * pxPerPt, height: page.height * pxPerPt }}
                 >
                   <canvas
                     ref={(el) => {
                       canvases.current[i] = el;
                     }}
-                    onMouseDown={(e) => onPageClick(e, page)}
+                    onMouseDown={(e) => onPageMouseDown(e, i)}
+                    onMouseMove={(e) => onPageMouseMove(e, i)}
                     className="block h-full w-full cursor-text"
                   />
                   {doc.selection
-                    .filter((r) => r.y >= page.y && r.y < page.y + page.height)
+                    .filter((r) => r.page === i)
                     .map((r, j) => (
                       <div
                         key={j}
                         className="pointer-events-none absolute bg-[#6C9FCB]/35"
-                        style={{
-                          left: (r.x - page.x) * pxPerTwip,
-                          top: (r.y - page.y) * pxPerTwip,
-                          width: r.width * pxPerTwip,
-                          height: r.height * pxPerTwip,
-                        }}
+                        style={{ left: r.x * pxPerPt, top: r.y * pxPerPt, width: r.width * pxPerPt, height: r.height * pxPerPt }}
                       />
                     ))}
                   {cursorHere && (
                     <div
                       className="pointer-events-none absolute w-[2px] animate-pulse bg-[#083B69]"
                       style={{
-                        left: (cursorHere.x - page.x) * pxPerTwip,
-                        top: (cursorHere.y - page.y) * pxPerTwip,
-                        height: Math.max(cursorHere.height * pxPerTwip, 12),
+                        left: cursorHere.x * pxPerPt,
+                        top: cursorHere.y * pxPerPt,
+                        height: Math.max(cursorHere.height * pxPerPt, 12),
                       }}
                     />
                   )}

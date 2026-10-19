@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lithora",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "io.github.kisaragi000.lithora",
   "build": {
     "frontendDist": "../dist",
@@ -41,18 +41,10 @@
     "publisher": "Kisaragi and the Lithora contributors",
     "homepage": "https://github.com/Kisaragi000/Lithora",
     "copyright": "Copyright (c) 2026 Kisaragi and the Lithora contributors",
-    "longDescription": "Lithora is a free, open source word processor for Word and RTF documents in English, Russian and Armenian. It uses LibreOffice to lay out pages exactly.",
+    "longDescription": "Lithora is a free, open source word processor for Word and RTF documents in English, Russian and Armenian. It lays out and edits pages with its own engine, so nothing else needs to be installed.",
     "linux": {
       "deb": {
-        "recommends": [
-          "libreoffice-writer"
-        ],
         "section": "editors"
-      },
-      "rpm": {
-        "recommends": [
-          "libreoffice-writer"
-        ]
       }
     },
     "windows": {
@@ -65,6 +57,10 @@
         ],
         "displayLanguageSelector": true
       }
+    },
+    "resources": {
+      "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
+      "../third-party/": "third-party/"
     }
   }
 }

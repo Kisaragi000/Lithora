@@ -7,7 +7,9 @@ pub fn run() {
         .manage(engine::EngineState::default())
         .invoke_handler(tauri::generate_handler![
             engine::engine_open,
+            engine::engine_state,
             engine::engine_render_page,
+            engine::engine_type,
             engine::engine_key,
             engine::engine_click,
             engine::engine_command,
@@ -24,14 +26,6 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                // Close the document so LibreOffice removes its lock file.
-                use tauri::Manager;
-                app.state::<engine::EngineState>().close();
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        });
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
