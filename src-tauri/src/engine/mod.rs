@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
-use wordcraft_engine::doc::Block;
+use wordcraft_engine::doc::{Block, PartKind, Pos, StoryRef};
 use wordcraft_engine::render::{RenderOptions, render_page};
 use wordcraft_engine::{Region, Session};
 
@@ -25,7 +25,17 @@ pub struct EngineState(Mutex<Documents>);
 #[derive(Default)]
 pub struct Documents {
     next_id: u32,
-    sessions: HashMap<u32, Session>,
+    pub(crate) sessions: HashMap<u32, Session>,
+    /// Where each document keeps its AutoRecover copy (the app's data folder), once known.
+    pub(crate) recovery_dir: Option<PathBuf>,
+    /// The custom dictionary file ("Add to dictionary"), once known.
+    pub(crate) user_dict: Option<PathBuf>,
+}
+
+impl EngineState {
+    pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, Documents>, String> {
+        self.0.lock().map_err(|_| "the engine stopped".to_string())
+    }
 }
 
 /// A page's size in points (1/72 inch).
@@ -64,6 +74,16 @@ pub struct DocState {
     pub format: Value,
     /// The paragraph's own alignment: left, center, right, justify, or null when it comes from its style.
     pub align: Option<String>,
+    /// Where the cursor is: "body", "header", "footer", "textBox", "note" or "comment".
+    pub story: &'static str,
+    /// The cursor is in a table.
+    pub in_table: bool,
+    /// Track Changes is on.
+    pub track_changes: bool,
+    /// The selected picture or shape's frame, when one is selected.
+    pub object: Option<Mark>,
+    /// The line spacing of the cursor's paragraph, as a multiple (1, 1.15, 1.5, 2…), when it is one.
+    pub line_spacing: Option<f32>,
 }
 
 /// What a command returns: the new state, and the command's own answer (Copy's text, for one).
@@ -128,6 +148,7 @@ fn doc_state(id: u32, s: &mut Session) -> DocState {
             .collect();
         (None, rects)
     };
+    let object = selected_object(s, &layout);
     let format = s.run("format.state", &json!({})).unwrap_or(Value::Null);
     let align = s
         .doc
@@ -146,20 +167,79 @@ fn doc_state(id: u32, s: &mut Session) -> DocState {
         dirty: s.dirty,
         format,
         align,
+        story: story_kind(s),
+        in_table: s.sel.focus.path.cell().is_some(),
+        track_changes: s.doc.settings.track_changes,
+        object,
+        line_spacing: s.doc.para_at(&s.sel.focus).and_then(|p| p.props.line_spacing).and_then(|ls| match ls {
+            wordcraft_engine::doc::props::LineSpacing::Multiple(m) => Some(m),
+            _ => None,
+        }),
     }
+}
+
+/// What kind of text the cursor is in.
+fn story_kind(s: &Session) -> &'static str {
+    match s.sel.focus.story {
+        StoryRef::Body => "body",
+        StoryRef::Part(id) => match s.doc.parts.get(&id).map(|p| p.kind) {
+            Some(PartKind::Header) => "header",
+            Some(PartKind::Footer) => "footer",
+            Some(PartKind::TextBox) => "textBox",
+            Some(PartKind::Comment) => "comment",
+            _ => "note",
+        },
+    }
+}
+
+/// The frame of the picture or shape the selection is exactly, if it is one.
+fn selected_object(s: &Session, layout: &wordcraft_engine::layout::DocLayout) -> Option<Mark> {
+    let (a, b) = s.sel.ordered();
+    let len = wordcraft_engine::doc::para::OBJ.len_utf8();
+    if a.story != b.story || a.path != b.path || b.off != a.off + len {
+        return None;
+    }
+    let hit = layout.find_object(s.page_hint, |o| o.pos() == a)?;
+    if hit.text_box.is_some() {
+        return None;
+    }
+    Some(Mark { page: hit.page, x: hit.rect.x, y: hit.rect.y, width: hit.rect.w, height: hit.rect.h })
 }
 
 fn run(s: &mut Session, id: &str, params: Value) -> Result<Value, String> {
     s.run(id, &params).map_err(|e| e.to_string())
 }
 
-fn add(state: &State<EngineState>, mut session: Session) -> Result<DocState, String> {
+fn add(state: &State<EngineState>, session: Session) -> Result<DocState, String> {
     let mut docs = lock(state)?;
+    add_to(&mut docs, session)
+}
+
+/// Give a new session the app's folders (AutoRecover copies, the custom dictionary) and the
+/// computer's user name for comments and tracked changes, and keep it under a new id.
+pub(crate) fn add_to(docs: &mut Documents, mut session: Session) -> Result<DocState, String> {
     docs.next_id += 1;
     let id = docs.next_id;
+    // The engine's default author is "WordCraft User"; never show that name in Lithora.
+    session.author = user_name().unwrap_or_else(|| "Lithora User".to_string());
+    session.user_dict_path = docs.user_dict.clone();
+    if let Some(dir) = &docs.recovery_dir
+        && let Err(e) = session.enable_recovery(dir.clone(), Arc::new(|| {}))
+    {
+        log::warn!("AutoRecover is off for this document: {e}");
+    }
     let result = doc_state(id, &mut session);
     docs.sessions.insert(id, session);
     Ok(result)
+}
+
+/// The signed-in user's name, for comments and tracked changes.
+fn user_name() -> Option<String> {
+    ["USERNAME", "USER", "LOGNAME"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
 }
 
 /// Open a document in a new tab.
@@ -187,7 +267,11 @@ pub fn engine_new(state: State<EngineState>, name: String) -> Result<DocState, S
 /// Close a document's tab. Unsaved changes are lost, so the interface asks first.
 #[tauri::command]
 pub fn engine_close(state: State<EngineState>, doc: u32) -> Result<(), String> {
-    lock(&state)?.sessions.remove(&doc);
+    if let Some(mut s) = lock(&state)?.sessions.remove(&doc) {
+        // Closed on purpose: its AutoRecover copy goes too.
+        s.dirty = false;
+        s.recovery_tick();
+    }
     Ok(())
 }
 
@@ -209,7 +293,13 @@ pub fn engine_render_page(
     with_doc(&state, doc, |s| {
         let layout = s.layout();
         let p = layout.pages.get(page).ok_or("no such page")?;
-        let r = render_page(&s.doc, p, scale, &RenderOptions::default());
+        let mut opts = RenderOptions::default();
+        // Editing a header or footer dims the body, as in Word.
+        if matches!(s.sel.focus.story, StoryRef::Part(_)) && matches!(story_kind(s), "header" | "footer") {
+            opts.display.dim_header = false;
+            opts.display.dim_body = true;
+        }
+        let r = render_page(&s.doc, p, scale, &opts);
         let mut out = Vec::with_capacity(8 + r.pixels.len());
         out.extend_from_slice(&r.width.to_le_bytes());
         out.extend_from_slice(&r.height.to_le_bytes());
@@ -277,9 +367,52 @@ pub fn engine_click(
                 run(s, "caret.set", json!({ "pos": pos, "extend": true }))?;
             }
         } else {
+            // A click on a picture or shape selects it.
+            let story = s.sel.focus.story;
+            let layout = s.layout();
+            if let Some(hit) = layout.object_at_in(page, x, y, 3.0, story).filter(|h| h.text_box.is_none()) {
+                let a = hit.pos();
+                let b = Pos { off: a.off + wordcraft_engine::doc::para::OBJ.len_utf8(), ..a.clone() };
+                s.page_hint = page;
+                run(s, "select.range", json!({ "anchor": a, "focus": b }))?;
+                return Ok(doc_state(doc, s));
+            }
             // A click beside the text (in a margin) is not an error: the cursor stays put.
             let _ = run(s, "caret.set", json!({ "page": page, "x": x, "y": y }));
         }
+        Ok(doc_state(doc, s))
+    })
+}
+
+/// A double click: in the header or footer area it goes in to edit it (making one if the page
+/// has none), in the body it comes back out; anywhere else it selects the word.
+#[tauri::command]
+pub fn engine_double_click(state: State<EngineState>, doc: u32, page: usize, x: f32, y: f32) -> Result<DocState, String> {
+    with_doc(&state, doc, |s| {
+        let story = s.sel.focus.story;
+        let layout = s.layout();
+        let kind = story_kind(s);
+        let in_hf = matches!(kind, "header" | "footer");
+        if let Some((shown, header)) = layout.header_footer_zone(page, y)
+            && (story == StoryRef::Body || (in_hf && shown != Some(story)))
+        {
+            let id = if header { "insert.editHeader" } else { "insert.editFooter" };
+            run(s, id, json!({ "page": page }))?;
+            let story = s.sel.focus.story;
+            if let Some(pos) = s.layout().hit(page, x, y, story) {
+                let _ = run(s, "caret.set", json!({ "pos": pos }));
+            }
+            return Ok(doc_state(doc, s));
+        }
+        if in_hf && layout.header_footer_zone(page, y).is_none() {
+            let _ = run(s, "insert.closeHeader", json!({}));
+            if let Some(pos) = s.layout().hit(page, x, y, StoryRef::Body) {
+                let _ = run(s, "caret.set", json!({ "pos": pos }));
+            }
+            return Ok(doc_state(doc, s));
+        }
+        let _ = run(s, "caret.set", json!({ "page": page, "x": x, "y": y }));
+        let _ = run(s, "select.word", json!({}));
         Ok(doc_state(doc, s))
     })
 }
@@ -540,5 +673,27 @@ mod tests {
             }
             std::fs::write(format!("{out}/page{i}.ppm"), ppm).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod spelling_tests {
+    use wordcraft_engine::proof::{ProofLang, by_script, is_correct_in, set_dictionaries_folder, suggest_in};
+
+    #[test]
+    fn russian_and_armenian_spelling_use_the_bundled_dictionaries() {
+        set_dictionaries_folder(Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dictionaries")));
+        assert!(wordcraft_engine::proof::hy::has_dictionary());
+        for w in ["աշխարհ", "Բարև", "Ի՞նչ", "անում", "տունը"] {
+            assert!(is_correct_in(w, ProofLang::Hy), "{w}");
+        }
+        assert!(!is_correct_in("աշխարհհ", ProofLang::Hy));
+        assert!(suggest_in("աշխարհհ", 5, ProofLang::Hy).contains(&"աշխարհ".to_string()));
+        assert!(is_correct_in("привет", ProofLang::Ru));
+        assert!(!is_correct_in("приввет", ProofLang::Ru));
+        // Words in another script than the text's language are checked in their own language.
+        assert_eq!(by_script("мир", ProofLang::En), ProofLang::Ru);
+        assert_eq!(by_script("տուն", ProofLang::En), ProofLang::Hy);
+        assert_eq!(by_script("house", ProofLang::En), ProofLang::En);
     }
 }

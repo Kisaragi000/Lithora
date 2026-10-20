@@ -1,4 +1,7 @@
 mod engine;
+mod print;
+mod recovery;
+mod signatures;
 mod title_bar;
 mod updater;
 
@@ -19,10 +22,19 @@ pub fn run() {
             engine::engine_type,
             engine::engine_key,
             engine::engine_click,
+            engine::engine_double_click,
             engine::engine_command,
             engine::engine_save,
             engine::engine_fonts,
             engine::startup_files,
+            print::print_printers,
+            print::engine_print,
+            recovery::recovery_list,
+            recovery::recovery_open,
+            recovery::recovery_discard,
+            signatures::signatures_list,
+            signatures::signature_add,
+            signatures::signature_delete,
             updater::check_update,
             updater::install_update,
             updater::open_releases_page,
@@ -31,6 +43,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 title_bar::apply(&window);
             }
+            setup_engine(app.handle());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -42,4 +55,31 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Point the engine at Lithora's spelling dictionaries, the custom dictionary and the
+/// AutoRecover folder, and start keeping recovery copies.
+fn setup_engine(app: &tauri::AppHandle) {
+    // The Russian and Armenian dictionaries ship with Lithora (src-tauri/dictionaries).
+    let bundled = app.path().resource_dir().ok().map(|d| d.join("dictionaries")).filter(|d| d.is_dir());
+    let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dictionaries");
+    let dictionaries = bundled.or_else(|| (cfg!(debug_assertions) && dev.is_dir()).then_some(dev));
+    wordcraft_engine::proof::set_dictionaries_folder(dictionaries);
+    // Read the big dictionaries now, so the first Russian or Armenian word typed doesn't wait.
+    std::thread::spawn(|| {
+        wordcraft_engine::proof::hy::has_dictionary();
+        wordcraft_engine::proof::is_correct_in("привет", wordcraft_engine::proof::ProofLang::Ru);
+    });
+    if let Ok(data) = app.path().app_data_dir() {
+        let user_dict = data.join("custom-dictionary.txt");
+        let _ = std::fs::create_dir_all(&data);
+        wordcraft_engine::proof::load_user_dictionary(&user_dict);
+        let recovery_dir = data.join("recovery");
+        let _ = std::fs::create_dir_all(&recovery_dir);
+        if let Ok(mut docs) = app.state::<engine::EngineState>().lock() {
+            docs.user_dict = Some(user_dict);
+            docs.recovery_dir = Some(recovery_dir);
+        }
+    }
+    recovery::start(app.clone());
 }

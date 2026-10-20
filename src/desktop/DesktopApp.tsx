@@ -7,19 +7,52 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { FileText, FolderOpen, Globe, Minus, Plus, Save, X } from 'lucide-react';
+import { ClipboardPaste, Copy, FileText, FolderOpen, Globe, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
 import { listenForFileDrops } from './fileDrop';
-import { DocState, engine, OPEN_EXTENSIONS, SAVE_FILTERS } from './engine';
+import { DocState, engine, OPEN_EXTENSIONS, RecoveredDoc, SAVE_FILTERS } from './engine';
 import { PageView, PageViewHandle } from './PageView';
 import { Ribbon, RibbonAction } from './Ribbon';
 import { strings } from './strings';
 import { UpdateButton } from './UpdateButton';
+import { ContextMenu, MenuItem } from './ContextMenu';
+import { LinkDialog, PrintDialog, RecoveryDialog, SymbolDialog, TextDialog, WordCountDialog, WordCountInfo } from './Dialogs';
+import { FindBar } from './FindBar';
+import { HistoryState, PanelKind, SidePanel } from './SidePanel';
+import { SignatureDialog } from './SignatureDialog';
 
 const LANGUAGE_KEY = 'lithora_ui_language';
 const ZOOM_KEY = 'lithora_zoom';
+const RECENT_KEY = 'lithora_recent';
+const RECENT_MAX = 12;
+
+function storedRecent(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+    return Array.isArray(v) ? v.filter((p) => typeof p === 'string').slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+type Dialog =
+  | { kind: 'print' }
+  | { kind: 'link' }
+  | { kind: 'symbol' }
+  | { kind: 'wordCount'; info: WordCountInfo }
+  | { kind: 'comment' }
+  | { kind: 'reply'; id: number }
+  | { kind: 'signature' }
+  | { kind: 'recovery'; docs: RecoveredDoc[] };
+
+interface Issue {
+  text: string;
+  kind: 'spelling' | 'grammar';
+  message: string;
+  suggestions: string[];
+}
 
 function storedLanguage(): Language {
   try {
@@ -55,6 +88,14 @@ export const DesktopApp: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [recent, setRecent] = useState<string[]>(storedRecent);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [findBar, setFindBar] = useState<'find' | 'replace' | null>(null);
+  const [panel, setPanel] = useState<PanelKind | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  /** The status bar's word count: the document's, and the selection's when there is one. */
+  const [words, setWords] = useState<{ total: number; selected: number | null } | null>(null);
+  const [histories, setHistories] = useState<Record<number, HistoryState>>({});
   const view = useRef<PageViewHandle>(null);
   const untitledCount = useRef(0);
   const docsRef = useRef(docs);
@@ -71,6 +112,18 @@ export const DesktopApp: React.FC = () => {
     }
     document.documentElement.lang = lang;
   }, [lang, zoom]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [recent]);
+
+  const remember = useCallback((path: string) => {
+    setRecent((list) => [path, ...list.filter((p) => p !== path)].slice(0, RECENT_MAX));
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -121,14 +174,16 @@ export const DesktopApp: React.FC = () => {
           const state = await engine.open(path);
           docsRef.current = [...docsRef.current, state];
           addDoc(state);
+          remember(path);
           opened += 1;
         } catch (e) {
           showError(`${strings[lang].couldNotOpen} ${baseName(path)}: ${e}`);
+          setRecent((list) => list.filter((p) => p !== path));
         }
       }
       return opened;
     },
-    [addDoc, lang, showError],
+    [addDoc, lang, remember, showError],
   );
 
   const openFiles = useCallback(async () => {
@@ -144,13 +199,14 @@ export const DesktopApp: React.FC = () => {
       try {
         updateDoc(await engine.save(doc.id, target));
         setNotice({ text: `${strings[lang].savedAs} ${baseName(target)}` });
+        if (!/\.(pdf|html?|md|txt)$/i.test(target)) remember(target);
         return true;
       } catch (e) {
         showError(`${strings[lang].couldNotSave}: ${e}`);
         return false;
       }
     },
-    [lang, showError, updateDoc],
+    [lang, remember, showError, updateDoc],
   );
 
   const save = useCallback(
@@ -220,6 +276,9 @@ export const DesktopApp: React.FC = () => {
       } else {
         loadFonts(docsRef.current[0].id);
       }
+      // Documents Lithora kept copies of when it last closed without saving them.
+      const left = await engine.recoveryList().catch(() => [] as RecoveredDoc[]);
+      if (left.length > 0) setDialog({ kind: 'recovery', docs: left });
     })().catch((e) => showError(String(e)));
   }, [loadFonts, newDocument, openPaths, showError]);
 
@@ -268,7 +327,25 @@ export const DesktopApp: React.FC = () => {
           if (doc) void closeDoc(doc);
           return true;
         case 'Mod+P':
-          if (doc) void exportPdf(doc);
+          if (doc) setDialog({ kind: 'print' });
+          return true;
+        case 'Mod+F':
+          if (doc) setFindBar((b) => b ?? 'find');
+          return true;
+        case 'Mod+H':
+          if (doc) setFindBar('replace');
+          return true;
+        case 'Mod+K':
+          if (doc) setDialog({ kind: 'link' });
+          return true;
+        case 'F7':
+          if (doc) void spellingRef.current();
+          return true;
+        case 'Mod+Shift+G':
+          if (doc) void wordCountRef.current();
+          return true;
+        case 'Mod+Alt+M':
+          if (doc) setDialog({ kind: 'comment' });
           return true;
         case 'Mod+=':
         case 'Mod+Shift+=':
@@ -281,7 +358,7 @@ export const DesktopApp: React.FC = () => {
           return false;
       }
     },
-    [activeId, closeDoc, exportPdf, newDocument, openFiles, save, saveAs],
+    [activeId, closeDoc, newDocument, openFiles, save, saveAs],
   );
 
   // The same shortcuts when the keyboard is outside the page (in the ribbon, say).
@@ -298,8 +375,162 @@ export const DesktopApp: React.FC = () => {
   }, [shortcut]);
 
   const onCommand = (name: string, params?: Record<string, unknown>) => {
-    view.current?.command(name, params).catch(() => undefined);
+    view.current?.command(name, params).catch((e) => showError(String(e)));
   };
+
+  /** Run an engine command and get its answer (errors become a notice). */
+  const ask_ = useCallback(
+    async (name: string, params?: Record<string, unknown>, keepFocus?: boolean): Promise<unknown> => {
+      try {
+        return await view.current?.command(name, params, keepFocus);
+      } catch (e) {
+        showError(String(e));
+        return null;
+      }
+    },
+    [showError],
+  );
+
+  const pxPerPt = (96 * zoom) / 72;
+
+  /** Where a point on a page is in the window. */
+  const screenPoint = (page: number, x: number, y: number) => {
+    const el = document.querySelector(`[data-page="${page}"]`) as HTMLElement | null;
+    const r = el?.getBoundingClientRect();
+    return r ? { x: r.left + x * pxPerPt, y: r.top + y * pxPerPt } : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  };
+
+  /** Menu rows for a misspelled word (or grammar issue) at the cursor. */
+  const issueItems = (issue: Issue | null): MenuItem[] => {
+    if (!issue) return [];
+    const items: MenuItem[] = [];
+    if (issue.kind === 'grammar') items.push({ label: issue.message, onClick: () => undefined, muted: true, disabled: true });
+    if (issue.suggestions.length === 0) items.push({ label: t.noSuggestions, onClick: () => undefined, muted: true, disabled: true });
+    for (const s of issue.suggestions.slice(0, 6)) items.push({ label: s, strong: true, onClick: () => onCommand('review.applySuggestion', { text: s }) });
+    if (issue.kind === 'spelling') {
+      items.push({ label: t.addToDictionary, onClick: () => onCommand('review.addToDictionary', { word: issue.text }) });
+      items.push({ label: t.ignoreAll, onClick: () => onCommand('review.ignoreAll', { word: issue.text }) });
+    }
+    items.push({ separator: true });
+    return items;
+  };
+
+  const openContextMenu = async (x: number, y: number) => {
+    const doc = docsRef.current.find((d) => d.id === activeId);
+    if (!doc) return;
+    const items: MenuItem[] = [];
+    if (doc.object) {
+      items.push(
+        { label: t.wrapInFront, onClick: () => onCommand('arrange.wrap', { wrap: 'inFrontOfText' }) },
+        { label: t.wrapSquare, onClick: () => onCommand('arrange.wrap', { wrap: 'square' }) },
+        { label: t.wrapInline, onClick: () => onCommand('arrange.wrap', { wrap: 'inline' }) },
+        { separator: true },
+      );
+    } else if (doc.selection.length === 0) {
+      const r = await engine.command(doc.id, 'review.suggestions').catch(() => null);
+      items.push(...issueItems((r?.result as Issue | null) ?? null));
+    }
+    items.push(
+      { label: t.cut2, icon: <Scissors className="h-3.5 w-3.5" />, onClick: () => void view.current?.cut(), disabled: doc.selection.length === 0 && !doc.object },
+      { label: t.copy2, icon: <Copy className="h-3.5 w-3.5" />, onClick: () => void view.current?.copy(), disabled: doc.selection.length === 0 && !doc.object },
+      { label: t.paste2, icon: <ClipboardPaste className="h-3.5 w-3.5" />, onClick: () => void onAction('paste') },
+    );
+    if (doc.object) items.push({ label: t.deleteObject, onClick: () => onCommand('text.delete') });
+    if (doc.inTable) {
+      items.push(
+        { separator: true },
+        { label: t.rowAbove, onClick: () => onCommand('table.insertRowAbove') },
+        { label: t.rowBelow, onClick: () => onCommand('table.insertRowBelow') },
+        { label: t.colLeft, onClick: () => onCommand('table.insertColumnLeft') },
+        { label: t.colRight, onClick: () => onCommand('table.insertColumnRight') },
+        { label: t.deleteRow, onClick: () => onCommand('table.deleteRow') },
+        { label: t.deleteColumn, onClick: () => onCommand('table.deleteColumn') },
+        { label: t.mergeCells, onClick: () => onCommand('table.merge'), disabled: doc.selection.length === 0 },
+      );
+    }
+    items.push(
+      { separator: true },
+      { label: t.link, icon: <Link2 className="h-3.5 w-3.5" />, onClick: () => setDialog({ kind: 'link' }) },
+      { label: t.newComment, icon: <MessageSquarePlus className="h-3.5 w-3.5" />, onClick: () => setDialog({ kind: 'comment' }) },
+    );
+    setMenu({ x, y, items });
+  };
+
+  /** F7: the next misspelling, with its suggestions in a menu beside it. */
+  const spelling = async () => {
+    const doc = docsRef.current.find((d) => d.id === activeId);
+    if (!doc) return;
+    const r = (await ask_('review.spelling')) as (Issue & { done?: boolean }) | null;
+    if (!r || r.done) {
+      setNotice({ text: t.spellingDone });
+      return;
+    }
+    // The issue is selected now; open the menu under it.
+    setTimeout(() => {
+      const d = docsRef.current.find((x) => x.id === doc.id);
+      const sel = d?.selection[0];
+      const p = sel ? screenPoint(sel.page, sel.x, sel.y + sel.height) : { x: window.innerWidth / 2, y: window.innerHeight / 3 };
+      setMenu({ x: p.x, y: p.y + 4, items: [...issueItems(r), { label: t.findNext, onClick: () => void spellingRef.current() }] });
+    }, 30);
+  };
+  const spellingRef = useRef(spelling);
+  spellingRef.current = spelling;
+
+  const wordCount = async () => {
+    const r = (await ask_('review.wordCount')) as WordCountInfo | null;
+    if (r) setDialog({ kind: 'wordCount', info: r });
+  };
+  const wordCountRef = useRef(wordCount);
+  wordCountRef.current = wordCount;
+
+  // The status bar's word count, after typing pauses.
+  useEffect(() => {
+    if (!active) {
+      setWords(null);
+      return;
+    }
+    const id = active.id;
+    const timer = setTimeout(() => {
+      engine
+        .command(id, 'review.wordCount')
+        .then((r) => {
+          const n = (r.result as WordCountInfo).words;
+          const selecting = active.selection.length > 0 && !active.object;
+          setWords((w) => (selecting ? { total: w?.total ?? n, selected: n } : { total: n, selected: null }));
+        })
+        .catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [active]);
+
+  // History: the undo steps from the engine, and the undone ones kept here (greyed in the panel).
+  const lastUndo = useRef<Record<number, { labels: string[]; depth: number }>>({});
+  useEffect(() => {
+    if (!active) return;
+    const { id, canRedo } = active;
+    const timer = setTimeout(() => {
+      engine
+        .command(id, 'edit.undoHistory')
+        .then((r) => {
+          const res = r.result as { undo: string[]; depth: number };
+          const labels = res.undo ?? [];
+          const depth = res.depth ?? labels.length;
+          const before = lastUndo.current[id] ?? { labels: [], depth: 0 };
+          lastUndo.current[id] = { labels, depth };
+          setHistories((all) => {
+            const prev = all[id]?.undone ?? [];
+            const delta = depth - before.depth;
+            let undone = prev;
+            if (!r.state.canRedo && !canRedo) undone = [];
+            else if (delta < 0) undone = [...before.labels.slice(0, -delta).reverse(), ...prev];
+            else if (delta > 0) undone = prev.slice(delta);
+            return { ...all, [id]: { done: [...labels].reverse(), undone } };
+          });
+        })
+        .catch(() => undefined);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [active]);
 
   const onAction = async (action: RibbonAction) => {
     const doc = active;
@@ -314,6 +545,8 @@ export const DesktopApp: React.FC = () => {
         return doc && void saveAs(doc);
       case 'exportPdf':
         return doc && void exportPdf(doc);
+      case 'print':
+        return doc && setDialog({ kind: 'print' });
       case 'copy':
         return void view.current?.copy();
       case 'cut':
@@ -331,6 +564,42 @@ export const DesktopApp: React.FC = () => {
         if (typeof picked === 'string') onCommand('insert.picture', { path: picked });
         return;
       }
+      case 'signature':
+        return setDialog({ kind: 'signature' });
+      case 'link':
+        return setDialog({ kind: 'link' });
+      case 'symbol':
+        return setDialog({ kind: 'symbol' });
+      case 'comment':
+        return setDialog({ kind: 'comment' });
+      case 'wordCount':
+        return void wordCount();
+      case 'spelling':
+        return void spelling();
+      case 'find':
+        return setFindBar('find');
+      case 'replace':
+        return setFindBar('replace');
+      case 'history':
+        return setPanel((p) => (p === 'history' ? null : 'history'));
+      case 'comments':
+        return setPanel((p) => (p === 'comments' ? null : 'comments'));
+    }
+  };
+
+  const insertSignature = (png: string, widthPt: number) => {
+    // In line with the text at the cursor, like a typed word; right-click to float it.
+    void view.current?.commands([['insert.picture', { data: png, width: widthPt, alt: t.signature }]]);
+  };
+
+  const openRecovered = async (r: RecoveredDoc) => {
+    const base = r.name === 'Untitled draft' ? t.untitled : withoutExtension(r.name);
+    const ext = r.name.match(/\.[^.]+$/)?.[0] ?? '.docx';
+    try {
+      const state = await engine.recoveryOpen(r.id, `${base} (${t.recovered})${ext}`);
+      addDoc(state);
+    } catch (e) {
+      showError(String(e));
     }
   };
 
@@ -439,19 +708,58 @@ export const DesktopApp: React.FC = () => {
         </button>
       </div>
 
-      <Ribbon t={t} doc={active} fonts={fonts} onCommand={onCommand} onAction={(a) => void onAction(a)} />
+      <Ribbon
+        t={t}
+        doc={active}
+        fonts={fonts}
+        recent={recent}
+        onOpenRecent={(path) => void openPaths([path])}
+        onClearRecent={() => setRecent([])}
+        onCommand={onCommand}
+        onAction={(a) => void onAction(a)}
+      />
+
+      {active && findBar && (
+        <FindBar
+          t={t}
+          replaceMode={findBar === 'replace'}
+          onCommand={(name, params) => ask_(name, params, true)}
+          onClose={() => {
+            setFindBar(null);
+            view.current?.focus();
+          }}
+        />
+      )}
 
       {active ? (
-        <PageView
-          key={active.id}
-          ref={view}
-          doc={active}
-          zoom={zoom}
-          onState={updateDoc}
-          onError={showError}
-          onShortcut={shortcut}
-          onCurrentPage={setCurrentPage}
-        />
+        <div className="flex min-h-0 flex-1">
+          <PageView
+            key={active.id}
+            ref={view}
+            doc={active}
+            zoom={zoom}
+            onState={updateDoc}
+            onError={showError}
+            onShortcut={shortcut}
+            onCurrentPage={setCurrentPage}
+            onContextMenu={(x, y) => void openContextMenu(x, y)}
+          />
+          {panel && (
+            <SidePanel
+              t={t}
+              lang={lang}
+              kind={panel}
+              doc={active}
+              history={histories[active.id] ?? { done: [], undone: [] }}
+              onKind={setPanel}
+              onClose={() => setPanel(null)}
+              onCommand={onCommand}
+              onUndoTo={(count) => onCommand('edit.undoTo', { count })}
+              onRedo={(count) => void view.current?.commands(Array.from({ length: count }, () => ['edit.redo'] as [string]))}
+              onReply={(id) => setDialog({ kind: 'reply', id })}
+            />
+          )}
+        </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
           <LithoraLogo className="h-14 w-14 opacity-90" />
@@ -482,7 +790,17 @@ export const DesktopApp: React.FC = () => {
             <span>
               {t.page} {Math.min(currentPage + 1, active.pages.length)} {t.of} {active.pages.length}
             </span>
+            {words !== null && (
+              <button type="button" onClick={() => void wordCount()} className="rounded px-1 hover:bg-slate-100" title={t.wordCount}>
+                {words.selected !== null
+                  ? t.wordsOf.replace('{n}', words.selected.toLocaleString()).replace('{total}', words.total.toLocaleString())
+                  : words.total === 1
+                    ? t.wordsOne
+                    : t.wordsShort.replace('{n}', words.total.toLocaleString())}
+              </button>
+            )}
             <span className={active.dirty ? 'text-[#376FA3]' : 'text-emerald-700'}>{active.dirty ? t.unsaved : t.saved}</span>
+            {active.trackChanges && <span className="rounded bg-red-50 px-1.5 text-red-700">{t.trackChanges}</span>}
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -519,6 +837,67 @@ export const DesktopApp: React.FC = () => {
         </div>
       )}
       {dragging && <DropOverlay label={t.dropToOpen} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {dialog?.kind === 'print' && active && (
+        <PrintDialog
+          t={t}
+          docId={active.id}
+          hasSelection={active.selection.length > 0}
+          currentPage={currentPage}
+          onClose={() => setDialog(null)}
+          onDone={(text, error) => setNotice({ text, error })}
+        />
+      )}
+      {dialog?.kind === 'link' && (
+        <LinkDialog t={t} initialText="" onClose={() => setDialog(null)} onInsert={(url, text) => onCommand('insert.link', text ? { url, text } : { url })} />
+      )}
+      {dialog?.kind === 'symbol' && <SymbolDialog t={t} onClose={() => setDialog(null)} onInsert={(char) => onCommand('insert.symbol', { char })} />}
+      {dialog?.kind === 'wordCount' && <WordCountDialog t={t} info={dialog.info} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'comment' && (
+        <TextDialog
+          title={t.newComment}
+          placeholder={t.commentPlaceholder}
+          okLabel={t.insertBtn}
+          cancelLabel={t.cancel}
+          onClose={() => setDialog(null)}
+          onSubmit={(text) => {
+            // The comment's marks shift the text, so the old selection would no longer match it.
+            void view.current?.commands([
+              ['review.newComment', { text }],
+              ['select.collapse', {}],
+            ]);
+            setPanel('comments');
+          }}
+        />
+      )}
+      {dialog?.kind === 'reply' && (
+        <TextDialog
+          title={t.reply}
+          placeholder={t.commentPlaceholder}
+          okLabel={t.reply}
+          cancelLabel={t.cancel}
+          onClose={() => setDialog(null)}
+          onSubmit={(text) => onCommand('review.reply', { id: dialog.id, text })}
+        />
+      )}
+      {dialog?.kind === 'signature' && <SignatureDialog t={t} onClose={() => setDialog(null)} onInsert={insertSignature} onError={showError} />}
+      {dialog?.kind === 'recovery' && (
+        <RecoveryDialog
+          t={t}
+          docs={dialog.docs}
+          onClose={() => setDialog(null)}
+          onOpen={(r) => {
+            void openRecovered(r);
+            const rest = dialog.docs.filter((d) => d.id !== r.id);
+            setDialog(rest.length ? { kind: 'recovery', docs: rest } : null);
+          }}
+          onDiscard={(r) => {
+            void engine.recoveryDiscard(r.id);
+            const rest = dialog.docs.filter((d) => d.id !== r.id);
+            setDialog(rest.length ? { kind: 'recovery', docs: rest } : null);
+          }}
+        />
+      )}
     </div>
   );
 };

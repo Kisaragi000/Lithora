@@ -6,8 +6,8 @@ Lithora includes the following third-party software. Each keeps its own license.
 
 Lithora's document engine is built on the Rust crates of WordCraft
 (https://github.com/storytold/wordcraft).
-Lithora ships a modified copy of its `wordcraft-formats` crate in
-`src-tauri/vendor/wordcraft-formats` (changes listed in its README).
+Lithora ships modified copies of its `wordcraft-formats` and `wordcraft-proof` crates in
+`src-tauri/vendor/` (changes listed in each crate's README).
 
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option. See
@@ -22,6 +22,27 @@ licenses in `third-party/wordcraft/OFL-*.txt`.
 
 The WordCraft and ArtCraft names and logos are trademarks of the ArtCraft Team and are not used
 by Lithora.
+
+## craft-print
+
+Printing uses the `craft-print` crate of craft-libs (https://github.com/storytold/craft-libs),
+Copyright (c) 2026 ArtCraft Team and the craft-libs contributors. Licensed under the MIT License
+or the Apache License, Version 2.0, at your option. See
+[third-party/craft-libs/](third-party/craft-libs/) for the license texts and notice.
+
+## Armenian spelling dictionary (HySpell)
+
+`src-tauri/dictionaries/hy_AM.aff` and `hy_AM.dic` are the Reformed-orthography Hunspell
+dictionary of HySpell 3.0.1 (https://github.com/hyspell/HySpell_3.0.1, files `hy-r.aff` and
+`hy-r.dic`, renamed). Copyright (c) 2017 hyspell.com, author Haro Mherian. MIT License; the full
+notice is in [src-tauri/dictionaries/LICENSE-hy_AM.txt](src-tauri/dictionaries/LICENSE-hy_AM.txt).
+
+## Russian spelling dictionary
+
+`src-tauri/dictionaries/ru_RU.aff` and `ru_RU.dic` come from the LibreOffice dictionaries
+(https://github.com/LibreOffice/dictionaries, `ru_RU`). Copyright (c) 1997-2008 Alexander I.
+Lebedev, with changes by Laszlo Nemeth. BSD-style license; the full notice is in
+[src-tauri/dictionaries/LICENSE-ru_RU.txt](src-tauri/dictionaries/LICENSE-ru_RU.txt).
 
 ## Rust and JavaScript libraries
 

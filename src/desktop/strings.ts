@@ -1,5 +1,6 @@
 // Interface text for the desktop editor in English, Russian and Armenian.
 import type { Language } from '../types/document';
+import { moreStrings, type MoreStrings } from './stringsMore';
 
 const en = {
   open: 'Open',
@@ -104,9 +105,10 @@ const en = {
   openHint: 'Open a Word, RTF or OpenDocument file, or drop one here.',
 };
 
-type Strings = typeof en;
+type BaseStrings = typeof en;
+type Strings = BaseStrings & MoreStrings;
 
-const ru: Strings = {
+const ru: BaseStrings = {
   open: 'Открыть',
   save: 'Сохранить',
   saveAs: 'Сохранить как',
@@ -209,7 +211,7 @@ const ru: Strings = {
   openHint: 'Откройте файл Word, RTF или OpenDocument или перетащите его сюда.',
 };
 
-const hy: Strings = {
+const hy: BaseStrings = {
   open: 'Բացել',
   save: 'Պահպանել',
   saveAs: 'Պահպանել որպես',
@@ -312,5 +314,9 @@ const hy: Strings = {
   openHint: 'Բացեք Word, RTF կամ OpenDocument ֆայլ կամ քաշեք այն այստեղ։',
 };
 
-export const strings: Record<Language, Strings> = { en, ru, hy };
+export const strings: Record<Language, Strings> = {
+  en: { ...en, ...moreStrings.en },
+  ru: { ...ru, ...moreStrings.ru },
+  hy: { ...hy, ...moreStrings.hy },
+};
 export type { Strings };

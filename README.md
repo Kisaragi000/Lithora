@@ -33,7 +33,13 @@ edits the pages.
   survives the round trip.
 - Word-style ribbon, multiple documents in tabs, find and replace, outline, ruler.
 - Interface in English, Russian (Русский) and Armenian (Հայերեն).
-- Offline proofreading rules for English, Russian and Armenian.
+- Spell check as you type in English, Russian and Armenian, with suggestions on right-click.
+- Printing to any installed printer, with copies, page ranges and two-sided printing.
+- Tables, headers and footers, page numbers, comments and tracked changes.
+- Drawn signatures: sign with the mouse, a pen or a finger, save the signature and place it
+  anywhere in a document.
+- A History panel (like Photoshop's): click any earlier step to go back to it.
+- AutoRecover: documents that weren't saved come back after a crash, plus a Recent files list.
 - Missing-font detection with Google Fonts substitutes.
 
 ## Roadmap

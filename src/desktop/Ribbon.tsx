@@ -7,7 +7,29 @@ import {
   AlignLeft,
   AlignRight,
   Baseline,
+  BookOpenCheck,
   Bold,
+  Check,
+  CheckCheck,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  FileSignature,
+  Hash,
+  History,
+  Link2,
+  ListChecks,
+  MessageSquarePlus,
+  MessagesSquare,
+  Omega,
+  PanelBottom,
+  PanelTop,
+  Printer,
+  Search,
+  SpellCheck,
+  Trash2,
+  X as XIcon,
+  XCircle,
   ChevronDown,
   ClipboardPaste,
   Copy,
@@ -35,21 +57,67 @@ import {
   Table,
   Underline,
   Undo2,
+  BetweenHorizontalEnd,
+  BetweenHorizontalStart,
+  BetweenVerticalEnd,
+  BetweenVerticalStart,
+  TableCellsMerge,
+  TableCellsSplit,
 } from 'lucide-react';
 import type { DocState } from './engine';
 import type { Strings } from './strings';
 
-export type RibbonAction = 'new' | 'open' | 'save' | 'saveAs' | 'exportPdf' | 'paste' | 'copy' | 'cut' | 'picture';
+export type RibbonAction =
+  | 'new'
+  | 'open'
+  | 'save'
+  | 'saveAs'
+  | 'exportPdf'
+  | 'print'
+  | 'paste'
+  | 'copy'
+  | 'cut'
+  | 'picture'
+  | 'signature'
+  | 'link'
+  | 'symbol'
+  | 'comment'
+  | 'wordCount'
+  | 'spelling'
+  | 'find'
+  | 'replace'
+  | 'history'
+  | 'comments';
 
 interface RibbonProps {
   t: Strings;
   doc: DocState | null;
   fonts: string[];
+  recent: string[];
+  onOpenRecent(path: string): void;
+  onClearRecent(): void;
   onCommand(name: string, params?: Record<string, unknown>): void;
   onAction(action: RibbonAction): void;
 }
 
-type Tab = 'file' | 'home' | 'insert' | 'layout';
+type Tab = 'file' | 'home' | 'insert' | 'layout' | 'review' | 'table' | 'headerFooter';
+
+const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3];
+
+const SHADES = ['FFFFFF', 'F2F2F2', 'D9D9D9', 'BFBFBF', 'DCE6F2', 'B9CDE5', '6C9FCB', 'E4DFEC', 'B9AEDC', 'FBF8F0', 'FFF2CC', 'E2EFDA', 'FCE4D6', 'FFC7CE'];
+
+/** A row in a drop-down panel. */
+function MenuRow({ children, onClick, active }: { children: React.ReactNode; onClick(): void; active?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-slate-100 ${active ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'}`}
+    >
+      {children}
+    </button>
+  );
+}
 
 const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
 
@@ -91,7 +159,7 @@ function Btn({
       // Keep the keyboard in the document while clicking the ribbon.
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-[13px] transition-colors disabled:pointer-events-none disabled:opacity-35 ${
+      className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] transition-colors disabled:pointer-events-none disabled:opacity-35 ${
         wide ? 'px-2.5' : 'w-8'
       } ${active ? 'bg-[#376FA3]/15 text-[#083B69] ring-1 ring-[#376FA3]/40' : 'text-slate-700 hover:bg-[#6C9FCB]/15 hover:text-[#083B69]'}`}
     >
@@ -401,18 +469,93 @@ function TablePicker({ t, onPick }: { t: Strings; onPick(rows: number, cols: num
   );
 }
 
-export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onAction }) => {
+/** Page numbers: top or bottom of the page, left, centre or right, "3" or "Page 3 of 10". */
+function PageNumberMenu({
+  t,
+  disabled,
+  current,
+  onCommand,
+}: {
+  t: Strings;
+  disabled?: boolean;
+  /** In a header or footer: also offer "at the cursor". */
+  current?: boolean;
+  onCommand(name: string, params?: Record<string, unknown>): void;
+}) {
+  const [xOfY, setXOfY] = useState(false);
+  return (
+    <Popover
+      title={t.pageNumber}
+      disabled={disabled}
+      label={
+        <span className="flex items-center gap-1.5 px-1">
+          <Hash className="h-4 w-4" /> {t.pageNumber}
+        </span>
+      }
+    >
+      {(close) => (
+        <div className="flex w-60 flex-col">
+          {(['top', 'bottom', ...(current ? ['current'] : [])] as const).map((position) => (
+            <div key={position} className="mb-1">
+              <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#376FA3]">
+                {position === 'top' ? t.pageNumberTop : position === 'bottom' ? t.pageNumberBottom : t.insertBtn}
+              </div>
+              <div className="flex gap-1 px-1">
+                {(position === 'current' ? (['left'] as const) : (['left', 'center', 'right'] as const)).map((align) => (
+                  <button
+                    key={align}
+                    type="button"
+                    onClick={() => {
+                      onCommand('insert.pageNumber', { position, align, ...(xOfY ? { format: 'x of y' } : {}) });
+                      close();
+                    }}
+                    className="flex-1 rounded border border-slate-200 px-2 py-1 text-[12px] text-slate-700 hover:border-[#6C9FCB] hover:bg-[#6C9FCB]/15"
+                  >
+                    {position === 'current' ? '#' : align === 'left' ? t.left : align === 'center' ? t.center : t.right}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <label className="mt-1 flex items-center gap-2 px-2 py-1 text-[13px] text-slate-700">
+            <input type="checkbox" checked={xOfY} onChange={(e) => setXOfY(e.target.checked)} className="accent-[#376FA3]" />
+            {t.pageNumberXofY}
+          </label>
+        </div>
+      )}
+    </Popover>
+  );
+}
+
+export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction }) => {
   const [tab, setTab] = useState<Tab>('home');
   const f = doc?.format ?? null;
   const none = !doc;
   const style = f?.style ?? '';
+  const inHeaderFooter = doc?.story === 'header' || doc?.story === 'footer';
+  const inTable = !!doc?.inTable;
 
-  const tabs: [Tab, string][] = [
+  // The Table and Header & Footer tabs appear while the cursor is in one, as in Word.
+  const tabs: [Tab, string, boolean?][] = [
     ['file', t.file],
     ['home', t.home],
     ['insert', t.insert],
     ['layout', t.layout],
+    ['review', t.review],
+    ...(inTable ? ([['table', t.tableTab, true]] as [Tab, string, boolean][]) : []),
+    ...(inHeaderFooter ? ([['headerFooter', t.headerFooterTab, true]] as [Tab, string, boolean][]) : []),
   ];
+
+  // Going into a header or table opens its tab; leaving it goes back to Home.
+  const wasHeader = useRef(false);
+  useEffect(() => {
+    if (inHeaderFooter && !wasHeader.current) setTab('headerFooter');
+    if (!inHeaderFooter && tab === 'headerFooter') setTab('home');
+    wasHeader.current = inHeaderFooter;
+  }, [inHeaderFooter, tab]);
+  useEffect(() => {
+    if (!inTable && tab === 'table') setTab('home');
+  }, [inTable, tab]);
 
   const fontValue = f?.font ?? '';
   const fontOptions = fontValue && !fonts.includes(fontValue) ? [fontValue, ...fonts] : fonts;
@@ -420,7 +563,7 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
   return (
     <div className="shrink-0 border-b border-slate-200 bg-white select-none">
       <div className="flex items-end gap-1 border-b border-slate-200 bg-[#F7F8FB] px-3 pt-1.5">
-        {tabs.map(([key, label]) => (
+        {tabs.map(([key, label, contextual]) => (
           <button
             key={key}
             type="button"
@@ -428,9 +571,11 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
             onClick={() => setTab(key)}
             className={`-mb-px rounded-t-md px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
               tab === key
-                ? 'border-x border-t border-slate-200 bg-white text-[#083B69]'
-                : 'text-slate-600 hover:text-[#083B69]'
-            }`}
+                ? `border-x border-t border-slate-200 bg-white ${contextual ? 'text-[#5B4B9A]' : 'text-[#083B69]'}`
+                : contextual
+                  ? 'text-[#5B4B9A] hover:text-[#3F3270]'
+                  : 'text-slate-600 hover:text-[#083B69]'
+            } ${contextual ? 'bg-[#B9AEDC]/25' : ''}`}
           >
             {label}
           </button>
@@ -452,9 +597,56 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
             <Btn wide title={t.saveAs} disabled={none} onClick={() => onAction('saveAs')}>
               <SaveAll className="h-4 w-4" /> {t.saveAs}
             </Btn>
+            <Popover
+              title={t.recent}
+              label={
+                <span className="flex items-center gap-1.5 px-1">
+                  <Clock className="h-4 w-4" /> {t.recent}
+                </span>
+              }
+            >
+              {(close) => (
+                <div className="flex w-80 flex-col">
+                  {recent.length === 0 && <div className="px-2 py-1.5 text-[13px] text-slate-500">{t.noRecent}</div>}
+                  {recent.map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      title={path}
+                      onClick={() => {
+                        onOpenRecent(path);
+                        close();
+                      }}
+                      className="rounded px-2 py-1.5 text-left hover:bg-slate-100"
+                    >
+                      <span className="block truncate text-[13px] font-medium text-slate-800">{path.split(/[\\/]/).pop()}</span>
+                      <span className="block truncate text-[11px] text-slate-500">{path}</span>
+                    </button>
+                  ))}
+                  {recent.length > 0 && (
+                    <>
+                      <div className="my-1 h-px bg-slate-200" />
+                      <MenuRow
+                        onClick={() => {
+                          onClearRecent();
+                          close();
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> {t.clearRecent}
+                      </MenuRow>
+                    </>
+                  )}
+                </div>
+              )}
+            </Popover>
+            <Divider />
+            <Btn wide title={`${t.print} (Ctrl+P)`} disabled={none} onClick={() => onAction('print')}>
+              <Printer className="h-4 w-4" /> {t.print}
+            </Btn>
             <Btn wide title={t.exportPdf} disabled={none} onClick={() => onAction('exportPdf')}>
               <FileDown className="h-4 w-4" /> {t.exportPdf}
             </Btn>
+            <span className="ml-3 hidden text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote}</span>
           </>
         )}
 
@@ -603,6 +795,41 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
             <Btn title={t.indent} disabled={none} onClick={() => onCommand('para.indent')}>
               <IndentIncrease className="h-4 w-4" />
             </Btn>
+            <Popover title={t.lineSpacing} disabled={none} label={<ListChecks className="h-4 w-4" />}>
+              {(close) => (
+                <div className="flex w-64 flex-col">
+                  {LINE_SPACINGS.map((v) => (
+                    <MenuRow
+                      key={v}
+                      active={doc?.lineSpacing != null && Math.abs(doc.lineSpacing - v) < 0.01}
+                      onClick={() => {
+                        onCommand('para.lineSpacing', { value: v });
+                        close();
+                      }}
+                    >
+                      <span className="w-8 tabular-nums">{v.toFixed(v % 1 === 0 ? 1 : 2).replace(/0$/, v % 1 === 0 ? '0' : '')}</span>
+                    </MenuRow>
+                  ))}
+                  <div className="my-1 h-px bg-slate-200" />
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('para.addSpaceBefore');
+                      close();
+                    }}
+                  >
+                    {t.addSpaceBefore}
+                  </MenuRow>
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('para.removeSpaceAfter');
+                      close();
+                    }}
+                  >
+                    {t.removeSpaceAfter}
+                  </MenuRow>
+                </div>
+              )}
+            </Popover>
             <Divider />
             {(
               [
@@ -617,6 +844,37 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
                 <span className={`whitespace-nowrap ${look}`}>{label}</span>
               </Btn>
             ))}
+            <Popover title={t.moreStyles} disabled={none} label={<span className="px-0.5 text-[12px]">{t.moreStyles}</span>}>
+              {(close) => (
+                <div className="flex w-56 flex-col">
+                  {(
+                    [
+                      ['Subtitle', t.subtitle, 'text-[14px] text-slate-500'],
+                      ['Heading4', t.heading4, 'text-[13px] font-semibold italic text-[#376FA3]'],
+                      ['Quote', t.quote, 'text-[13px] italic text-slate-600'],
+                      ['IntenseQuote', t.intenseQuote, 'text-[13px] italic text-[#376FA3]'],
+                      ['NoSpacing', t.noSpacing, 'text-[13px]'],
+                      ['ListParagraph', t.listParagraph, 'text-[13px] pl-3'],
+                    ] as const
+                  ).map(([id, label, look]) => (
+                    <MenuRow
+                      key={id}
+                      active={style === id}
+                      onClick={() => {
+                        onCommand('para.style', { style: id });
+                        close();
+                      }}
+                    >
+                      <span className={look}>{label}</span>
+                    </MenuRow>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <Divider />
+            <Btn title={`${t.findReplace} (Ctrl+H)`} disabled={none} onClick={() => onAction('replace')}>
+              <Search className="h-4 w-4" />
+            </Btn>
           </>
         )}
 
@@ -644,8 +902,285 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, onCommand, onActi
             <Btn wide title={t.picture} disabled={none} onClick={() => onAction('picture')}>
               <ImagePlus className="h-4 w-4" /> {t.picture}
             </Btn>
+            <Btn wide title={t.signature} disabled={none} onClick={() => onAction('signature')}>
+              <FileSignature className="h-4 w-4" /> {t.signature}
+            </Btn>
             <Btn wide title={t.pageBreak} disabled={none} onClick={() => onCommand('insert.pageBreak')}>
               <SeparatorHorizontal className="h-4 w-4" /> {t.pageBreak}
+            </Btn>
+            <Divider />
+            <Btn wide title={`${t.link} (Ctrl+K)`} disabled={none} onClick={() => onAction('link')}>
+              <Link2 className="h-4 w-4" /> {t.link}
+            </Btn>
+            <Btn wide title={t.symbol} disabled={none} onClick={() => onAction('symbol')}>
+              <Omega className="h-4 w-4" /> {t.symbol}
+            </Btn>
+            <Btn wide title={t.newComment} disabled={none} onClick={() => onAction('comment')}>
+              <MessageSquarePlus className="h-4 w-4" /> {t.newComment}
+            </Btn>
+            <Divider />
+            <Btn wide title={t.headerHint} disabled={none} onClick={() => onCommand('insert.editHeader')}>
+              <PanelTop className="h-4 w-4" /> {t.header}
+            </Btn>
+            <Btn wide title={t.headerHint} disabled={none} onClick={() => onCommand('insert.editFooter')}>
+              <PanelBottom className="h-4 w-4" /> {t.footer}
+            </Btn>
+            <PageNumberMenu t={t} disabled={none} onCommand={onCommand} />
+          </>
+        )}
+
+        {tab === 'review' && (
+          <>
+            <Btn wide title={`${t.spelling} (F7)`} disabled={none} onClick={() => onAction('spelling')}>
+              <SpellCheck className="h-4 w-4" /> {t.spelling}
+            </Btn>
+            <Btn wide title={t.wordCount} disabled={none} onClick={() => onAction('wordCount')}>
+              <BookOpenCheck className="h-4 w-4" /> {t.wordCount}
+            </Btn>
+            <Divider />
+            <Btn wide title={t.newComment} disabled={none} onClick={() => onAction('comment')}>
+              <MessageSquarePlus className="h-4 w-4" /> {t.newComment}
+            </Btn>
+            <Btn title={t.previousComment} disabled={none} onClick={() => onCommand('review.previousComment')}>
+              <ChevronLeft className="h-4 w-4" />
+            </Btn>
+            <Btn title={t.nextComment} disabled={none} onClick={() => onCommand('review.nextComment')}>
+              <ChevronRight className="h-4 w-4" />
+            </Btn>
+            <Btn title={t.deleteComment} disabled={none} onClick={() => onCommand('review.deleteComment')}>
+              <Trash2 className="h-4 w-4" />
+            </Btn>
+            <Btn wide title={t.comments} disabled={none} onClick={() => onAction('comments')}>
+              <MessagesSquare className="h-4 w-4" /> {t.comments}
+            </Btn>
+            <Divider />
+            <Btn wide title={`${t.trackChanges} (Ctrl+Shift+E)`} active={doc?.trackChanges} disabled={none} onClick={() => onCommand('review.trackChanges')}>
+              <span className={`h-2 w-2 rounded-full ${doc?.trackChanges ? 'bg-red-600' : 'bg-slate-300'}`} /> {t.trackChanges}
+            </Btn>
+            <Btn title={t.previousChange} disabled={none} onClick={() => onCommand('review.previousChange')}>
+              <ChevronLeft className="h-4 w-4" />
+            </Btn>
+            <Btn title={t.nextChange} disabled={none} onClick={() => onCommand('review.nextChange')}>
+              <ChevronRight className="h-4 w-4" />
+            </Btn>
+            <Btn wide title={t.accept} disabled={none} onClick={() => onCommand('review.accept')}>
+              <Check className="h-4 w-4" /> {t.accept}
+            </Btn>
+            <Btn wide title={t.reject} disabled={none} onClick={() => onCommand('review.reject')}>
+              <XCircle className="h-4 w-4" /> {t.reject}
+            </Btn>
+            <Popover title={t.acceptAll} disabled={none} label={<CheckCheck className="h-4 w-4" />}>
+              {(close) => (
+                <div className="flex w-56 flex-col">
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('review.acceptAll');
+                      close();
+                    }}
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" /> {t.acceptAll}
+                  </MenuRow>
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('review.rejectAll');
+                      close();
+                    }}
+                  >
+                    <XIcon className="h-3.5 w-3.5" /> {t.rejectAll}
+                  </MenuRow>
+                </div>
+              )}
+            </Popover>
+            <Divider />
+            <Btn wide title={t.history} disabled={none} onClick={() => onAction('history')}>
+              <History className="h-4 w-4" /> {t.history}
+            </Btn>
+          </>
+        )}
+
+        {tab === 'table' && (
+          <>
+            <Btn wide title={t.rowAbove} onClick={() => onCommand('table.insertRowAbove')}>
+              <BetweenHorizontalStart className="h-4 w-4" /> {t.rowAbove}
+            </Btn>
+            <Btn wide title={t.rowBelow} onClick={() => onCommand('table.insertRowBelow')}>
+              <BetweenHorizontalEnd className="h-4 w-4" /> {t.rowBelow}
+            </Btn>
+            <Btn wide title={t.colLeft} onClick={() => onCommand('table.insertColumnLeft')}>
+              <BetweenVerticalStart className="h-4 w-4" /> {t.colLeft}
+            </Btn>
+            <Btn wide title={t.colRight} onClick={() => onCommand('table.insertColumnRight')}>
+              <BetweenVerticalEnd className="h-4 w-4" /> {t.colRight}
+            </Btn>
+            <Divider />
+            <Popover title={t.deleteRow} label={<Trash2 className="h-4 w-4" />}>
+              {(close) => (
+                <div className="flex w-48 flex-col">
+                  {(
+                    [
+                      ['table.deleteRow', t.deleteRow],
+                      ['table.deleteColumn', t.deleteColumn],
+                      ['table.deleteTable', t.deleteTable],
+                    ] as const
+                  ).map(([cmd, label]) => (
+                    <MenuRow
+                      key={cmd}
+                      onClick={() => {
+                        onCommand(cmd);
+                        close();
+                      }}
+                    >
+                      {label}
+                    </MenuRow>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <Btn wide title={t.mergeCells} onClick={() => onCommand('table.merge')}>
+              <TableCellsMerge className="h-4 w-4" /> {t.mergeCells}
+            </Btn>
+            <Btn wide title={t.splitCells} onClick={() => onCommand('table.split', { columns: 2, rows: 1 })}>
+              <TableCellsSplit className="h-4 w-4" /> {t.splitCells}
+            </Btn>
+            <Divider />
+            <Popover title={t.borders} label={<span className="px-1">{t.borders}</span>}>
+              {(close) => (
+                <div className="flex w-48 flex-col">
+                  {(
+                    [
+                      ['all', t.allBorders],
+                      ['outside', t.outsideBorders],
+                      ['inside', t.insideBorders],
+                      ['none', t.noBorders],
+                    ] as const
+                  ).map(([kind, label]) => (
+                    <MenuRow
+                      key={kind}
+                      onClick={() => {
+                        onCommand('table.borders', { kind });
+                        close();
+                      }}
+                    >
+                      {label}
+                    </MenuRow>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <Popover title={t.shading} label={<span className="px-1">{t.shading}</span>}>
+              {(close) => (
+                <div className="w-48">
+                  <div className="grid grid-cols-7 gap-1">
+                    {SHADES.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        title={`#${c}`}
+                        onClick={() => {
+                          onCommand('table.shading', { color: c });
+                          close();
+                        }}
+                        className="h-5 w-5 rounded-sm border border-slate-300"
+                        style={{ background: `#${c}` }}
+                      />
+                    ))}
+                  </div>
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('table.shading', {});
+                      close();
+                    }}
+                  >
+                    {t.noShading}
+                  </MenuRow>
+                </div>
+              )}
+            </Popover>
+            <Popover title={t.cellAlign} label={<span className="px-1">{t.cellAlign}</span>}>
+              {(close) => (
+                <div className="grid w-28 grid-cols-3 gap-1 p-1">
+                  {['topLeft', 'topCenter', 'topRight', 'centerLeft', 'center', 'centerRight', 'bottomLeft', 'bottomCenter', 'bottomRight'].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      title={v}
+                      onClick={() => {
+                        onCommand('table.cellAlign', { value: v });
+                        close();
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded border border-slate-200 hover:bg-[#6C9FCB]/15"
+                    >
+                      <span
+                        className="h-1 w-3 rounded bg-[#376FA3]"
+                        style={{
+                          alignSelf: v.startsWith('top') ? 'flex-start' : v.startsWith('bottom') ? 'flex-end' : 'center',
+                          marginTop: v.startsWith('top') ? 4 : 0,
+                          marginBottom: v.startsWith('bottom') ? 4 : 0,
+                          justifySelf: 'center',
+                          transform: v.endsWith('Left') ? 'translateX(-4px)' : v.endsWith('Right') ? 'translateX(4px)' : undefined,
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Popover>
+            <Divider />
+            <Popover title={t.autofitContents} label={<span className="px-1">{t.distributeColumns}</span>}>
+              {(close) => (
+                <div className="flex w-52 flex-col">
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('table.distributeColumns');
+                      close();
+                    }}
+                  >
+                    {t.distributeColumns}
+                  </MenuRow>
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('table.autofit', { mode: 'contents' });
+                      close();
+                    }}
+                  >
+                    {t.autofitContents}
+                  </MenuRow>
+                  <MenuRow
+                    onClick={() => {
+                      onCommand('table.autofit', { mode: 'window' });
+                      close();
+                    }}
+                  >
+                    {t.autofitWindow}
+                  </MenuRow>
+                </div>
+              )}
+            </Popover>
+            <Btn wide title={t.repeatHeader} onClick={() => onCommand('table.repeatHeader')}>
+              {t.repeatHeader}
+            </Btn>
+          </>
+        )}
+
+        {tab === 'headerFooter' && (
+          <>
+            <Btn wide title={t.editHeader} onClick={() => onCommand('insert.editHeader')}>
+              <PanelTop className="h-4 w-4" /> {t.header}
+            </Btn>
+            <Btn wide title={t.editFooter} onClick={() => onCommand('insert.editFooter')}>
+              <PanelBottom className="h-4 w-4" /> {t.footer}
+            </Btn>
+            <PageNumberMenu t={t} onCommand={onCommand} current />
+            <Divider />
+            <Btn wide title={t.differentFirstPage} onClick={() => onCommand('layout.differentFirstPage')}>
+              {t.differentFirstPage}
+            </Btn>
+            <Divider />
+            <Btn wide title={doc?.story === 'header' ? t.removeHeader : t.removeFooter} onClick={() => onCommand(doc?.story === 'header' ? 'insert.removeHeader' : 'insert.removeFooter')}>
+              <Trash2 className="h-4 w-4" /> {doc?.story === 'header' ? t.removeHeader : t.removeFooter}
+            </Btn>
+            <Btn wide title={t.closeHeader} onClick={() => onCommand('insert.closeHeader')}>
+              <XIcon className="h-4 w-4" /> {t.closeHeader}
             </Btn>
           </>
         )}
