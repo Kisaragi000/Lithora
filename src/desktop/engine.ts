@@ -81,6 +81,14 @@ export interface Signature {
   data: string;
 }
 
+/** A page drawn by the engine: its size in pixels, and the rows that changed from `top` down (none: no change). */
+export interface PageImage {
+  width: number;
+  height: number;
+  top: number;
+  band: ImageData | null;
+}
+
 interface CommandReply {
   state: DocState;
   result: unknown;
@@ -109,12 +117,19 @@ export const engine = {
   addSignature: (data: string) => invoke<string>('signature_add', { data }),
   deleteSignature: (id: string) => invoke<void>('signature_delete', { id }),
   startupFiles: () => invoke<string[]>('startup_files'),
-  async renderPage(doc: number, page: number, scale: number): Promise<ImageData> {
-    const buf = await invoke<ArrayBuffer>('engine_render_page', { doc, page, scale });
+  /**
+   * Draw one page at `scale` pixels per point. With `have` (the window holds this page as the
+   * engine last sent it, at this scale) only the rows that changed come back, or none.
+   */
+  async renderPage(doc: number, page: number, scale: number, have: boolean): Promise<PageImage> {
+    const buf = await invoke<ArrayBuffer>('engine_render_page', { doc, page, scale, have });
     const view = new DataView(buf);
     const width = view.getUint32(0, true);
     const height = view.getUint32(4, true);
-    return new ImageData(new Uint8ClampedArray(buf, 8, width * height * 4), width, height);
+    const top = view.getUint32(8, true);
+    const rows = view.getUint32(12, true);
+    const band = rows > 0 ? new ImageData(new Uint8ClampedArray(buf, 16, width * rows * 4), width, rows) : null;
+    return { width, height, top, band };
   },
 };
 

@@ -30,6 +30,17 @@ pub struct Documents {
     pub(crate) recovery_dir: Option<PathBuf>,
     /// The custom dictionary file ("Add to dictionary"), once known.
     pub(crate) user_dict: Option<PathBuf>,
+    /// What the window last got for each page of each document, by (document, page).
+    painted: HashMap<(u32, usize), Painted>,
+}
+
+/// One page as the window last drew it: a fingerprint of what was on it, and of each row
+/// of pixels, so the next drawing sends only the rows that changed (or nothing).
+struct Painted {
+    key: u64,
+    width: u32,
+    height: u32,
+    rows: Vec<u64>,
 }
 
 impl EngineState {
@@ -243,7 +254,7 @@ fn user_name() -> Option<String> {
 }
 
 /// Open a document in a new tab.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_open(state: State<EngineState>, path: String) -> Result<DocState, String> {
     let path = PathBuf::from(path);
     let (doc, _encrypted) = wordcraft_engine::io::open_path_in(&path, None, &system_region())?;
@@ -254,7 +265,7 @@ pub fn engine_open(state: State<EngineState>, path: String) -> Result<DocState, 
 }
 
 /// A new blank document on the computer's paper size, in a new tab.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_new(state: State<EngineState>, name: String) -> Result<DocState, String> {
     let region = system_region();
     let mut session = Session::new(wordcraft_engine::blank_document(&region));
@@ -265,9 +276,11 @@ pub fn engine_new(state: State<EngineState>, name: String) -> Result<DocState, S
 }
 
 /// Close a document's tab. Unsaved changes are lost, so the interface asks first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_close(state: State<EngineState>, doc: u32) -> Result<(), String> {
-    if let Some(mut s) = lock(&state)?.sessions.remove(&doc) {
+    let mut docs = lock(&state)?;
+    docs.painted.retain(|(d, _), _| *d != doc);
+    if let Some(mut s) = docs.sessions.remove(&doc) {
         // Closed on purpose: its AutoRecover copy goes too.
         s.dirty = false;
         s.recovery_tick();
@@ -276,40 +289,132 @@ pub fn engine_close(state: State<EngineState>, doc: u32) -> Result<(), String> {
 }
 
 /// A document's pages, cursor and selection.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_state(state: State<EngineState>, doc: u32) -> Result<DocState, String> {
     with_doc(&state, doc, |s| Ok(doc_state(doc, s)))
 }
 
-/// Draw one page (0-based) at `scale` pixels per point. The reply is the width and
-/// height as two little-endian u32s, followed by RGBA pixels.
-#[tauri::command]
+/// Draw one page (0-based) at `scale` pixels per point, sending only what changed since the
+/// window last drew it. With `have` false (a new page, a new zoom) the whole page is sent.
+///
+/// The reply is four little-endian u32s, the page's width and height in pixels and the first
+/// row and number of rows sent, followed by those rows' RGBA pixels. No rows: nothing changed.
+/// Typing a letter usually changes a few lines of one page, so this is a few kilobytes
+/// instead of the whole page's megabytes, and pages the edit didn't touch aren't drawn at all.
+#[tauri::command(async)]
 pub fn engine_render_page(
     state: State<EngineState>,
     doc: u32,
     page: usize,
     scale: f32,
+    have: Option<bool>,
 ) -> Result<tauri::ipc::Response, String> {
-    with_doc(&state, doc, |s| {
-        let layout = s.layout();
-        let p = layout.pages.get(page).ok_or("no such page")?;
-        let mut opts = RenderOptions::default();
-        // Editing a header or footer dims the body, as in Word.
-        if matches!(s.sel.focus.story, StoryRef::Part(_)) && matches!(story_kind(s), "header" | "footer") {
-            opts.display.dim_header = false;
-            opts.display.dim_body = true;
+    let mut docs = lock(&state)?;
+    paint(&mut docs, doc, page, scale, have.unwrap_or(false)).map(tauri::ipc::Response::new)
+}
+
+/// [`engine_render_page`]'s reply.
+fn paint(docs: &mut Documents, doc: u32, page: usize, scale: f32, have: bool) -> Result<Vec<u8>, String> {
+    let s = docs.sessions.get_mut(&doc).ok_or("that document is closed")?;
+    let layout = s.layout();
+    let p = layout.pages.get(page).ok_or("no such page")?;
+    let mut opts = RenderOptions::default();
+    // Editing a header or footer dims the body, as in Word.
+    if matches!(s.sel.focus.story, StoryRef::Part(_)) && matches!(story_kind(s), "header" | "footer") {
+        opts.display.dim_header = false;
+        opts.display.dim_body = true;
+    }
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (page_content_key(p), p.number, layout.pages.len(), scale.to_bits(), opts.display.dim_body).hash(&mut h);
+        h.finish()
+    };
+    let slot = (doc, page);
+    let prev = if have { docs.painted.get(&slot) } else { None };
+    if let Some(prev) = prev
+        && prev.key == key
+    {
+        return Ok(page_reply(prev.width, prev.height, 0, 0, &[]));
+    }
+    let r = render_page(&s.doc, p, scale, &opts);
+    let pixels = r.to_straight();
+    let row_len = (r.width as usize * 4).max(1);
+    let rows: Vec<u64> = pixels.chunks(row_len).map(row_hash).collect();
+    let (first, end) = match prev {
+        Some(prev) if prev.width == r.width && prev.height == r.height => {
+            let same = |i: &usize| prev.rows[*i] == rows[*i];
+            let first = (0..rows.len()).find(|i| !same(i)).unwrap_or(rows.len());
+            let end = (first..rows.len()).rev().find(|i| !same(i)).map_or(first, |i| i + 1);
+            (first, end)
         }
-        let r = render_page(&s.doc, p, scale, &opts);
-        let mut out = Vec::with_capacity(8 + r.pixels.len());
-        out.extend_from_slice(&r.width.to_le_bytes());
-        out.extend_from_slice(&r.height.to_le_bytes());
-        out.extend_from_slice(&r.to_straight());
-        Ok(tauri::ipc::Response::new(out))
-    })
+        _ => (0, rows.len()),
+    };
+    let reply = page_reply(r.width, r.height, first as u32, (end - first) as u32, &pixels[first * row_len..end * row_len]);
+    docs.painted.insert(slot, Painted { key, width: r.width, height: r.height, rows });
+    Ok(reply)
+}
+
+fn page_reply(width: u32, height: u32, first: u32, count: u32, pixels: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16 + pixels.len());
+    for n in [width, height, first, count] {
+        out.extend_from_slice(&n.to_le_bytes());
+    }
+    out.extend_from_slice(pixels);
+    out
+}
+
+/// A fingerprint of one row of pixels.
+fn row_hash(row: &[u8]) -> u64 {
+    let mut h: u64 = 0x9E37_79B9_7F4A_7C15 ^ row.len() as u64;
+    let (words, rest) = row.as_chunks::<8>();
+    for w in words {
+        h = (h ^ u64::from_le_bytes(*w)).wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+        h ^= h >> 32;
+    }
+    for &b in rest {
+        h = (h ^ b as u64).wrapping_mul(0xC4CE_B9FE_1A85_EC53);
+    }
+    h
+}
+
+/// A fingerprint of a page's laid-out content: what it shows changes only when this does.
+/// From WordCraft's own window (crates/ui-egui/src/canvas.rs, page_content_key). Laid-out
+/// paragraphs are shared between layouts until they change, so their addresses say whether
+/// their lines did.
+fn page_content_key(page: &wordcraft_engine::layout::Page) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use wordcraft_engine::layout::Placed;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (page.w.to_bits(), page.h.to_bits()).hash(&mut h);
+    for list in [&page.items, &page.header, &page.footer] {
+        list.len().hash(&mut h);
+        for it in list.iter() {
+            match it {
+                Placed::Lines { para, l0, l1, x, y, turn, .. } => {
+                    (Arc::as_ptr(para) as usize, l0, l1, x.to_bits(), y.to_bits(), turn).hash(&mut h);
+                }
+                Placed::Fill { rect, color } => format!("{rect:?}{color:?}").hash(&mut h),
+                Placed::Rule { x0, y0, x1, y1, border } => format!("{x0}{y0}{x1}{y1}{border:?}").hash(&mut h),
+                Placed::Image { rect, media, spin, .. } => format!("{rect:?}{media}{spin:?}").hash(&mut h),
+                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra, .. } => {
+                    format!("{rect:?}{kind:?}{fill:?}{stroke:?}{stroke_width}{effects:?}{spin:?}{extra:?}").hash(&mut h);
+                    freeform.as_ref().map(|f| Arc::as_ptr(f) as usize).hash(&mut h);
+                }
+                Placed::Graphic { rect, graphic, spin, .. } => {
+                    (Arc::as_ptr(graphic) as usize, rect.x.to_bits(), rect.y.to_bits(), rect.w.to_bits(), rect.h.to_bits()).hash(&mut h);
+                    format!("{spin:?}").hash(&mut h)
+                }
+                Placed::Clip { rect, spin, items } => format!("{rect:?}{spin:?}{items:?}").hash(&mut h),
+                Placed::Cell { .. } | Placed::Object { .. } => {}
+            }
+        }
+    }
+    h.finish()
 }
 
 /// Type text at the cursor, replacing any selection.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_type(state: State<EngineState>, doc: u32, text: String) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
         run(s, "text.insert", json!({ "text": text }))?;
@@ -319,7 +424,7 @@ pub fn engine_type(state: State<EngineState>, doc: u32, text: String) -> Result<
 
 /// Run the command bound to a key such as `Mod+B`, `Shift+Left` or `Backspace`, as
 /// WordCraft's own window does. Returns `None` when no command is bound to the key.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_key(state: State<EngineState>, doc: u32, key: String) -> Result<Option<DocState>, String> {
     with_doc(&state, doc, |s| {
         let reg = s.registry.clone();
@@ -350,7 +455,7 @@ pub fn engine_key(state: State<EngineState>, doc: u32, key: String) -> Result<Op
 
 /// Put the cursor at a point on a page (0-based page, points from its top-left).
 /// With `extend`, the selection grows to that point instead.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_click(
     state: State<EngineState>,
     doc: u32,
@@ -386,7 +491,7 @@ pub fn engine_click(
 
 /// A double click: in the header or footer area it goes in to edit it (making one if the page
 /// has none), in the body it comes back out; anywhere else it selects the word.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_double_click(state: State<EngineState>, doc: u32, page: usize, x: f32, y: f32) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
         let story = s.sel.focus.story;
@@ -418,7 +523,7 @@ pub fn engine_double_click(state: State<EngineState>, doc: u32, page: usize, x: 
 }
 
 /// Run an engine command by id, such as `format.bold`, `edit.copy` or `insert.table`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_command(
     state: State<EngineState>,
     doc: u32,
@@ -490,7 +595,7 @@ fn fit_pasted_tables(s: &mut Session, before: &[Arc<Block>]) {
 
 /// Save the document: to `path` when given (the format follows its extension: docx, doc,
 /// rtf, odt, pdf, html, md, txt and more), else over the file it was opened from.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_save(state: State<EngineState>, doc: u32, path: Option<String>) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
         match path {
@@ -503,7 +608,7 @@ pub fn engine_save(state: State<EngineState>, doc: u32, path: Option<String>) ->
 }
 
 /// Font families the engine can draw, for the font menu.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn engine_fonts(state: State<EngineState>, doc: u32) -> Result<Value, String> {
     with_doc(&state, doc, |s| {
         let r = run(s, "font.list", json!({ "all": true }))?;
@@ -592,6 +697,37 @@ mod tests {
     }
 
     #[test]
+    fn redraws_send_only_what_changed() {
+        let header = |r: &[u8]| -> [u32; 4] { std::array::from_fn(|i| u32::from_le_bytes(r[i * 4..i * 4 + 4].try_into().unwrap())) };
+        let mut docs = Documents::default();
+        let body = "First paragraph.\n".repeat(80) + "Last line";
+        docs.sessions.insert(1, session_for("d.txt", &body));
+        let pages = docs.sessions.get_mut(&1).unwrap().layout().pages.len();
+        assert!(pages >= 2, "two pages to test with");
+        // The first drawing sends the whole page.
+        let r = paint(&mut docs, 1, 0, 1.0, false).unwrap();
+        let [w, h, first, count] = header(&r);
+        assert_eq!((first, count), (0, h));
+        assert_eq!(r.len(), 16 + (w * h * 4) as usize);
+        // Nothing changed: nothing sent.
+        let r = paint(&mut docs, 1, 0, 1.0, true).unwrap();
+        assert_eq!(header(&r)[3], 0);
+        assert_eq!(r.len(), 16);
+        // Typing on the first page sends a band of it, and leaves the last page alone.
+        paint(&mut docs, 1, pages - 1, 1.0, false).unwrap();
+        let s = docs.sessions.get_mut(&1).unwrap();
+        run(s, "caret.docStart", json!({})).unwrap();
+        run(s, "text.insert", json!({ "text": "Typed " })).unwrap();
+        let r = paint(&mut docs, 1, 0, 1.0, true).unwrap();
+        let [_, h, first, count] = header(&r);
+        assert!(count > 0 && count < h / 4, "a band of the page, not all of it: rows {first}+{count} of {h}");
+        assert_eq!(header(&paint(&mut docs, 1, pages - 1, 1.0, true).unwrap())[3], 0);
+        // Without what was drawn before (a new zoom), the whole page again.
+        let r = paint(&mut docs, 1, 0, 1.0, false).unwrap();
+        assert_eq!(header(&r)[3], header(&r)[1]);
+    }
+
+    #[test]
     fn pasted_tables_wider_than_the_page_are_fitted() {
         let mut s = Session::new(wordcraft_engine::blank_document(&Region::default()));
         let text_width = s.doc.sections()[0].1.text_width();
@@ -639,6 +775,34 @@ mod tests {
         let (doc, _) = wordcraft_engine::io::open_path_in(&out, None, &Region::default()).unwrap();
         assert_eq!(rows(&Session::new(doc)), expected, "RTF round trip");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Times keystrokes: the edit, the cursor state and the page's drawing, and how much of the
+    /// page goes to the window (cargo test --release -- --ignored --nocapture typing_timing).
+    #[test]
+    #[ignore]
+    fn typing_timing() {
+        let para = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Հայերեն տեքստ և русский текст здесь.\n";
+        let mut docs = Documents::default();
+        docs.sessions.insert(1, session_for("long.txt", &para.repeat(300)));
+        let s = docs.sessions.get_mut(&1).unwrap();
+        println!("pages: {}", s.layout().pages.len());
+        run(s, "caret.docEnd", json!({})).unwrap();
+        let page = doc_state(1, s).cursor.unwrap().page;
+        paint(&mut docs, 1, page, 2.0, false).unwrap();
+        paint(&mut docs, 1, page - 1, 2.0, false).unwrap();
+        for round in 0..5 {
+            let t = std::time::Instant::now();
+            let s = docs.sessions.get_mut(&1).unwrap();
+            run(s, "text.insert", json!({ "text": "x" })).unwrap();
+            doc_state(1, s);
+            let t1 = t.elapsed();
+            let sent = paint(&mut docs, 1, page, 2.0, true).unwrap().len();
+            let t2 = t.elapsed();
+            let other = paint(&mut docs, 1, page - 1, 2.0, true).unwrap().len();
+            let t3 = t.elapsed();
+            println!("key {round}: edit+state {t1:?}, its page {:?} ({sent} bytes), page above {:?} ({other} bytes)", t2 - t1, t3 - t2);
+        }
     }
 
     /// Renders every page of $LITHORA_RENDER_FILE to PPM images in $LITHORA_RENDER_OUT.

@@ -527,7 +527,8 @@ function PageNumberMenu({
   );
 }
 
-export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction }) => {
+/** Redrawn only when what it shows changes, and after typing has gone on screen (see DesktopApp). */
+export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction }: RibbonProps) {
   const [tab, setTab] = useState<Tab>('home');
   const f = doc?.format ?? null;
   const none = !doc;
@@ -1297,4 +1298,4 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, recent, onOpenRec
       </div>
     </div>
   );
-};
+});
