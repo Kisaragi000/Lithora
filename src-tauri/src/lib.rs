@@ -4,6 +4,7 @@ mod recovery;
 mod signatures;
 mod title_bar;
 mod updater;
+mod window_layout;
 
 use tauri::Manager;
 
@@ -12,6 +13,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(window_layout::plugin())
         .manage(engine::EngineState::default())
         .invoke_handler(tauri::generate_handler![
             engine::engine_open,
@@ -42,6 +44,7 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 title_bar::apply(&window);
+                window_layout::restore(&window);
             }
             setup_engine(app.handle());
             if cfg!(debug_assertions) {
