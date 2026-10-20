@@ -3,7 +3,7 @@
  * Rust crates), which lays out every page the way Word does; this screen holds the tabs,
  * ribbon and status bar around those pages.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -532,6 +532,14 @@ export const DesktopApp: React.FC = () => {
     return () => clearTimeout(timer);
   }, [active]);
 
+  // The ribbon catches up with typing a moment later, so a keystroke only redraws the page.
+  const ribbonDoc = useDeferredValue(active);
+  const latestHandlers = useRef({ openPaths, onCommand, onAction: (_: RibbonAction) => {} });
+  const ribbonOpenRecent = useCallback((path: string) => void latestHandlers.current.openPaths([path]), []);
+  const ribbonClearRecent = useCallback(() => setRecent([]), []);
+  const ribbonCommand = useCallback((name: string, params?: Record<string, unknown>) => latestHandlers.current.onCommand(name, params), []);
+  const ribbonAction = useCallback((a: RibbonAction) => latestHandlers.current.onAction(a), []);
+
   const onAction = async (action: RibbonAction) => {
     const doc = active;
     switch (action) {
@@ -586,6 +594,7 @@ export const DesktopApp: React.FC = () => {
         return setPanel((p) => (p === 'comments' ? null : 'comments'));
     }
   };
+  latestHandlers.current = { openPaths, onCommand, onAction: (a) => void onAction(a) };
 
   const insertSignature = (png: string, widthPt: number) => {
     // In line with the text at the cursor, like a typed word; right-click to float it.
@@ -710,13 +719,13 @@ export const DesktopApp: React.FC = () => {
 
       <Ribbon
         t={t}
-        doc={active}
+        doc={ribbonDoc}
         fonts={fonts}
         recent={recent}
-        onOpenRecent={(path) => void openPaths([path])}
-        onClearRecent={() => setRecent([])}
-        onCommand={onCommand}
-        onAction={(a) => void onAction(a)}
+        onOpenRecent={ribbonOpenRecent}
+        onClearRecent={ribbonClearRecent}
+        onCommand={ribbonCommand}
+        onAction={ribbonAction}
       />
 
       {active && findBar && (

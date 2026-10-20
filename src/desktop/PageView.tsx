@@ -7,6 +7,7 @@
  * in any text field.
  */
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { writeHtml, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { DocState, engine } from './engine';
 
@@ -100,15 +101,24 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   const canvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const pending = useRef(0);
+  /** Edits sent to the queue so far, to tell whether typing is still the last one waiting. */
+  const queued = useRef(0);
+  /** Typed text not yet sent, while its edit is still the last one waiting. */
+  const typing = useRef<{ text: string; at: number } | null>(null);
+  /** An edit's new state hasn't been shown yet (it comes with the page it changed). */
+  const unshown = useRef(false);
   const latest = useRef(doc);
-  latest.current = doc;
+  // While an edit's state waits for its page, an older one coming back from the app must not replace it.
+  if (!unshown.current) latest.current = doc;
   const dragging = useRef(false);
   const composing = useRef(false);
   const followCursor = useRef(false);
 
-  // Which pages are on screen, and which bitmaps are out of date.
+  // Which pages are on screen, which bitmaps are out of date, and the scale each canvas holds
+  // the engine's last drawing of its page at (so the engine can send only what changed).
   const visible = useRef(new Set<number>());
   const stale = useRef(new Set<number>());
+  const drawn = useRef(new Map<number, number>());
   const painting = useRef(false);
   const scaleRef = useRef(renderScale);
   scaleRef.current = renderScale;
@@ -121,6 +131,30 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     return next;
   }, []);
 
+  /** Bring one page's canvas up to date. Call it from the queue, between edits. */
+  const paintPage = useCallback(
+    async (page: number) => {
+      const scale = scaleRef.current;
+      if (!canvases.current[page]) return;
+      const image = await engine.renderPage(id, page, scale, drawn.current.get(page) === scale);
+      const canvas = canvases.current[page];
+      if (!canvas) return;
+      if (canvas.width !== image.width || canvas.height !== image.height) {
+        // A new size clears the canvas: it needs the whole page.
+        canvas.width = image.width;
+        canvas.height = image.height;
+        if (!image.band || image.top !== 0 || image.band.height !== image.height) {
+          drawn.current.delete(page);
+          stale.current.add(page);
+          return;
+        }
+      }
+      if (image.band) canvas.getContext('2d')?.putImageData(image.band, 0, image.top);
+      drawn.current.set(page, scale);
+    },
+    [id],
+  );
+
   /** Draw the visible pages that are out of date, the cursor's page first. */
   const paintVisible = useCallback(() => {
     if (painting.current) return;
@@ -128,7 +162,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     const loop = async () => {
       try {
         for (;;) {
-          // Typing is ahead of drawing: wait for the last key, then draw once.
+          // Typing is ahead of drawing: the last edit draws its own page, then this goes on.
           if (pending.current > 0) break;
           const cursorPage = latest.current.cursor?.page ?? -1;
           const todo = [...stale.current].filter((p) => visible.current.has(p));
@@ -136,12 +170,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
           todo.sort((a, b) => (a === cursorPage ? -1 : b === cursorPage ? 1 : a - b));
           const page = todo[0];
           stale.current.delete(page);
-          const image = await enqueue(() => engine.renderPage(id, page, scaleRef.current));
-          const canvas = canvases.current[page];
-          if (!canvas) continue;
-          canvas.width = image.width;
-          canvas.height = image.height;
-          canvas.getContext('2d')?.putImageData(image, 0, 0);
+          await enqueue(() => paintPage(page));
         }
       } catch (e) {
         onError(String(e));
@@ -150,7 +179,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
       }
     };
     void loop();
-  }, [enqueue, id, onError]);
+  }, [enqueue, onError, paintPage]);
 
   const markAllStale = useCallback(() => {
     stale.current = new Set(latest.current.pages.map((_, i) => i));
@@ -181,25 +210,52 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     markAllStale();
   }, [renderScale, id, markAllStale]);
 
-  /** Send one edit; every edit can reflow any page, so all pages are redrawn as they come into view. */
+  /**
+   * Show the edits made so far: the cursor's page is drawn first, then the new cursor and the
+   * new text go on screen in the same frame. Other pages follow as they come into view.
+   */
+  const settle = useCallback(async () => {
+    // Every edit can reflow any page; the engine sends nothing for a page that didn't change.
+    stale.current = new Set(latest.current.pages.map((_, i) => i));
+    const at = latest.current.cursor ?? latest.current.selection[latest.current.selection.length - 1];
+    let failed: unknown = null;
+    if (at && visible.current.has(at.page)) {
+      stale.current.delete(at.page);
+      try {
+        await paintPage(at.page);
+      } catch (e) {
+        stale.current.add(at.page);
+        failed = e;
+      }
+    }
+    if (unshown.current) {
+      unshown.current = false;
+      flushSync(() => onState(latest.current));
+    }
+    paintVisible();
+    if (failed) throw failed;
+  }, [onState, paintPage, paintVisible]);
+
+  /** Send one edit. While more are waiting, the screen catches up after the last one. */
   const run = useCallback(
     (action: () => Promise<DocState | null>, follow = true) => {
       pending.current += 1;
+      queued.current += 1;
       return enqueue(async () => {
         try {
           const next = await action();
           if (next) {
             latest.current = next;
-            followCursor.current = follow;
-            onState(next);
+            unshown.current = true;
+            if (follow) followCursor.current = true;
           }
         } finally {
           pending.current -= 1;
+          if (pending.current === 0) await settle();
         }
-        if (pending.current === 0) markAllStale();
       }).catch((e) => onError(String(e)));
     },
-    [enqueue, markAllStale, onError, onState],
+    [enqueue, onError, settle],
   );
 
   // Keep the cursor on screen after typing and moving with the keyboard.
@@ -210,6 +266,15 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     }
     setPaintTick((t) => t + 1);
   }, [doc]);
+
+  // The cursor stays solid while it moves, and starts blinking again once it rests.
+  useLayoutEffect(() => {
+    const el = cursorEl.current;
+    if (!el) return;
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  }, [doc.cursor?.page, doc.cursor?.x, doc.cursor?.y]);
 
   // Move the hidden text box to the cursor.
   useLayoutEffect(() => {
@@ -277,8 +342,21 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     focus();
   }, [id, focus]);
 
+  /** Type text. Keys pressed while the engine is busy go to it together, as one edit. */
   const typeText = (text: string) => {
-    if (text) run(() => engine.type(id, text));
+    if (!text) return;
+    const open = typing.current;
+    if (open && open.at === queued.current) {
+      open.text += text;
+      return;
+    }
+    const box = { text, at: 0 };
+    typing.current = box;
+    void run(() => {
+      if (typing.current === box) typing.current = null;
+      return engine.type(id, box.text);
+    });
+    box.at = queued.current;
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -489,6 +567,8 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
           >
             <canvas
               ref={(el) => {
+                // A new canvas is blank: it needs the whole page.
+                if (canvases.current[i] !== el) drawn.current.delete(i);
                 canvases.current[i] = el;
               }}
               className="pointer-events-none block h-full w-full"

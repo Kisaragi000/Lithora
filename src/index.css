@@ -231,4 +231,11 @@
 }
 .lithora-caret {
   animation: lithora-caret-blink 1.06s steps(1) infinite;
+  /* The cursor glides to its next place, as with Word's smooth typing. */
+  transition: left 70ms ease-out, top 70ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lithora-caret {
+    transition: none;
+  }
 }

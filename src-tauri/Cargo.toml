@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.3.1"
+version = "0.3.2"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
