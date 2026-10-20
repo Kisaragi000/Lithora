@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.2.5"
+version = "0.3.0"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -31,6 +31,10 @@ sys-locale = "0.3"
 tauri-plugin-clipboard-manager = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip", "json"] }
 semver = "1"
+# Printing: sends a print-ready PDF to the system spooler (CUPS on Linux, the Windows print
+# API on Windows). From WordCraft's craft-libs (MIT OR Apache-2.0), same pin as krilla below.
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8" }
+base64 = "0.22"
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
@@ -47,3 +51,5 @@ opt-level = 2
 # Lithora's copy of WordCraft's file import/export, with fixes (see vendor/wordcraft-formats).
 [patch."https://github.com/storytold/wordcraft"]
 wordcraft-formats = { path = "vendor/wordcraft-formats" }
+# Lithora's copy of WordCraft's proofing, with Armenian spelling (see vendor/wordcraft-proof).
+wordcraft-proof = { path = "vendor/wordcraft-proof" }

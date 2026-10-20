@@ -11,3 +11,4 @@ Lithora's changes:
   "don't break this row across pages" setting (`\trkeep`), when opening and when saving.
   Before, every row was as tall as its text, so forms with tall answer rows came out shorter
   than in Word and rows split across pages in the wrong places.
+- ODT and HTML files name Lithora, not WordCraft, as the program that wrote them.

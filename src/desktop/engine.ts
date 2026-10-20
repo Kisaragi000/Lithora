@@ -43,6 +43,42 @@ export interface DocState {
   dirty: boolean;
   format: FormatState | null;
   align: string | null;
+  /** Where the cursor is: body, header, footer, textBox, note or comment. */
+  story: string;
+  inTable: boolean;
+  trackChanges: boolean;
+  /** The selected picture or shape's frame. */
+  object: Mark | null;
+  lineSpacing: number | null;
+}
+
+export interface Printer {
+  name: string;
+  default: boolean;
+  twoSided: boolean | null;
+}
+
+export interface PrintOptions {
+  printer: string | null;
+  copies: number;
+  collate: boolean;
+  range: 'all' | 'current' | 'selection' | 'custom';
+  pages: string | null;
+  duplex: 'printerDefault' | 'off' | 'longEdge' | 'shortEdge';
+  grayscale: boolean;
+  currentPage: number | null;
+}
+
+export interface RecoveredDoc {
+  id: string;
+  name: string;
+  savedAt: string;
+}
+
+export interface Signature {
+  id: string;
+  /** PNG, base64. */
+  data: string;
 }
 
 interface CommandReply {
@@ -62,7 +98,16 @@ export const engine = {
   command: (doc: number, command: string, params?: Record<string, unknown>) =>
     invoke<CommandReply>('engine_command', { doc, command, params: params ?? null }),
   save: (doc: number, path?: string) => invoke<DocState>('engine_save', { doc, path: path ?? null }),
+  doubleClick: (doc: number, page: number, x: number, y: number) => invoke<DocState>('engine_double_click', { doc, page, x, y }),
   fonts: (doc: number) => invoke<string[]>('engine_fonts', { doc }),
+  printers: () => invoke<Printer[]>('print_printers'),
+  print: (doc: number, options: PrintOptions) => invoke<string>('engine_print', { doc, options }),
+  recoveryList: () => invoke<RecoveredDoc[]>('recovery_list'),
+  recoveryOpen: (id: string, name: string) => invoke<DocState>('recovery_open', { id, name }),
+  recoveryDiscard: (id: string) => invoke<void>('recovery_discard', { id }),
+  signatures: () => invoke<Signature[]>('signatures_list'),
+  addSignature: (data: string) => invoke<string>('signature_add', { data }),
+  deleteSignature: (id: string) => invoke<void>('signature_delete', { id }),
   startupFiles: () => invoke<string[]>('startup_files'),
   async renderPage(doc: number, page: number, scale: number): Promise<ImageData> {
     const buf = await invoke<ArrayBuffer>('engine_render_page', { doc, page, scale });

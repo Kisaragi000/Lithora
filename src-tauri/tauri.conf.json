@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lithora",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "identifier": "io.github.kisaragi000.lithora",
   "build": {
     "frontendDist": "../dist",
@@ -66,7 +66,8 @@
     },
     "resources": {
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
-      "../third-party/": "third-party/"
+      "../third-party/": "third-party/",
+      "dictionaries/": "dictionaries/"
     }
   }
 }

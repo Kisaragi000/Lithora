@@ -27,7 +27,11 @@ const NAMED_KEYS = new Set(['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'PageU
 export function keyCombo(e: React.KeyboardEvent): string | null {
   const mod = e.ctrlKey || e.metaKey;
   // AltGr (Ctrl+Alt on Windows) types characters on many keyboard layouts.
-  const altGr = e.ctrlKey && e.altKey && e.key.length === 1;
+  // A plain letter (the key's own Latin letter, or a Russian or Armenian one, which those
+  // layouts never type with AltGr) means Ctrl+Alt was meant as a shortcut, such as Ctrl+Alt+M.
+  const plainLetter =
+    (/^Key[A-Z]$/.test(e.code) && e.key.toUpperCase() === e.code.slice(3)) || /^[\u0400-\u04FF\u0531-\u0587]$/.test(e.key);
+  const altGr = e.ctrlKey && e.altKey && e.key.length === 1 && !plainLetter;
   let name = KEY_NAMES[e.key] ?? e.key;
   const named = NAMED_KEYS.has(name) || /^F([1-9]|1[0-9]|2[0-4])$/.test(name);
   if (!named) {
@@ -45,8 +49,13 @@ export function keyCombo(e: React.KeyboardEvent): string | null {
 }
 
 export interface PageViewHandle {
-  /** Run an engine command on this document; resolves to the command's own answer. */
-  command(name: string, params?: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Run an engine command on this document; resolves to the command's own answer. The keyboard
+   * goes back to the page afterwards unless `keepFocus` (a search box is typing, say).
+   */
+  command(name: string, params?: Record<string, unknown>, keepFocus?: boolean): Promise<unknown>;
+  /** Run several commands as one batch, in order (each still its own undo step). */
+  commands(list: [string, Record<string, unknown>?][]): Promise<void>;
   copy(): Promise<void>;
   cut(): Promise<void>;
   focus(): void;
@@ -61,10 +70,23 @@ interface PageViewProps {
   /** App shortcuts such as Ctrl+S; return true when handled. */
   onShortcut(combo: string): boolean;
   onCurrentPage(page: number): void;
+  /** A right click on a page, at a point in the window. */
+  onContextMenu(x: number, y: number): void;
+}
+
+/** Which corner of a picture's frame is being dragged. */
+type Corner = 'nw' | 'ne' | 'sw' | 'se';
+
+interface ObjectDrag {
+  kind: 'move' | Corner;
+  startX: number;
+  startY: number;
+  dx: number;
+  dy: number;
 }
 
 export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageView(
-  { doc, zoom, onState, onError, onShortcut, onCurrentPage },
+  { doc, zoom, onState, onError, onShortcut, onCurrentPage, onContextMenu },
   ref,
 ) {
   const id = doc.id;
@@ -202,15 +224,36 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   const focus = useCallback(() => input.current?.focus({ preventScroll: true }), []);
 
   const command = useCallback(
-    async (name: string, params?: Record<string, unknown>) => {
+    async (name: string, params?: Record<string, unknown>, keepFocus?: boolean) => {
       let answer: unknown = null;
+      let failed: unknown = null;
       await run(async () => {
-        const reply = await engine.command(id, name, params);
-        answer = reply.result;
-        return reply.state;
+        try {
+          const reply = await engine.command(id, name, params);
+          answer = reply.result;
+          return reply.state;
+        } catch (e) {
+          failed = e;
+          return null;
+        }
+      });
+      if (!keepFocus) focus();
+      if (failed) throw failed;
+      return answer;
+    },
+    [focus, id, run],
+  );
+
+  const commands = useCallback(
+    async (list: [string, Record<string, unknown>?][]) => {
+      await run(async () => {
+        let last: DocState | null = null;
+        for (const [name, params] of list) {
+          last = (await engine.command(id, name, params)).state;
+        }
+        return last;
       });
       focus();
-      return answer;
     },
     [focus, id, run],
   );
@@ -227,7 +270,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     else if (answer?.text) await writeText(answer.text);
   }, [command]);
 
-  useImperativeHandle(ref, () => ({ command, copy, cut, focus }), [command, copy, cut, focus]);
+  useImperativeHandle(ref, () => ({ command, commands, copy, cut, focus }), [command, commands, copy, cut, focus]);
 
   // Start typing straight away in a newly shown document.
   useEffect(() => {
@@ -292,15 +335,32 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   };
 
   const onPageMouseDown = (e: React.MouseEvent<HTMLElement>, page: number) => {
+    if (e.button === 2) {
+      // Right click: the cursor moves there first, unless it is on the selection.
+      e.preventDefault();
+      focus();
+      const { x, y } = pointOnPage(e);
+      const inSelection = latest.current.selection.some(
+        (r) => r.page === page && x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height,
+      );
+      const o = latest.current.object;
+      const onObject = o && o.page === page && x >= o.x && x <= o.x + o.width && y >= o.y && y <= o.y + o.height;
+      if (!inSelection && !onObject) run(() => engine.click(id, page, x, y, false), false);
+      return;
+    }
     if (e.button !== 0) return;
     e.preventDefault();
     focus();
     const { x, y } = pointOnPage(e);
-    if (e.detail === 2 || e.detail === 3) {
-      const unit = e.detail === 2 ? 'select.word' : 'select.paragraph';
+    if (e.detail === 2) {
+      // Double click: the word, or into (and out of) the header and footer.
+      run(() => engine.doubleClick(id, page, x, y), false);
+      return;
+    }
+    if (e.detail === 3) {
       run(async () => {
         await engine.click(id, page, x, y, false);
-        return (await engine.command(id, unit)).state;
+        return (await engine.command(id, 'select.paragraph')).state;
       }, false);
       return;
     }
@@ -322,6 +382,64 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   }, []);
 
   const cursor = doc.cursor;
+
+  // Dragging a selected picture to move it, or a corner to resize it.
+  const [objectDrag, setObjectDrag] = useState<ObjectDrag | null>(null);
+  const objectDragRef = useRef<ObjectDrag | null>(null);
+  objectDragRef.current = objectDrag;
+
+  const startObjectDrag = (e: React.MouseEvent, kind: ObjectDrag['kind']) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    focus();
+    setObjectDrag({ kind, startX: e.clientX, startY: e.clientY, dx: 0, dy: 0 });
+  };
+
+  useEffect(() => {
+    if (!objectDrag) return;
+    const move = (e: MouseEvent) => {
+      const d = objectDragRef.current;
+      if (d) setObjectDrag({ ...d, dx: e.clientX - d.startX, dy: e.clientY - d.startY });
+    };
+    const up = (e: MouseEvent) => {
+      const d = objectDragRef.current;
+      setObjectDrag(null);
+      const o = latest.current.object;
+      if (!d || !o) return;
+      const dx = (e.clientX - d.startX) / pxPerPt;
+      const dy = (e.clientY - d.startY) / pxPerPt;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      if (d.kind === 'move') {
+        // Dropped on another page: it moves there.
+        let page = o.page;
+        let x = o.x + dx;
+        let y = o.y + dy;
+        const target = document.elementsFromPoint(e.clientX, e.clientY).find((el) => (el as HTMLElement).dataset?.page !== undefined) as HTMLElement | undefined;
+        if (target && Number(target.dataset.page) !== o.page) {
+          const r = target.getBoundingClientRect();
+          page = Number(target.dataset.page);
+          const grabX = (d.startX - (column.current?.querySelector(`[data-page="${o.page}"]`)?.getBoundingClientRect().left ?? 0)) / pxPerPt - o.x;
+          const grabY = (d.startY - (column.current?.querySelector(`[data-page="${o.page}"]`)?.getBoundingClientRect().top ?? 0)) / pxPerPt - o.y;
+          x = (e.clientX - r.left) / pxPerPt - grabX;
+          y = (e.clientY - r.top) / pxPerPt - grabY;
+        }
+        run(async () => (await engine.command(id, 'arrange.bounds', { page, x, y })).state);
+      } else {
+        const { width, height } = resized(o.width, o.height, d.kind, dx, dy);
+        run(async () => (await engine.command(id, 'arrange.bounds', { width, height })).state);
+      }
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objectDrag !== null, id, pxPerPt, run]);
+
+  const object = doc.object;
 
   // The page in the top third of the window is the current one, for the status bar.
   const reportPage = useCallback(() => {
@@ -362,6 +480,12 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
             style={{ width: page.width * pxPerPt, height: page.height * pxPerPt }}
             onMouseDown={(e) => onPageMouseDown(e, i)}
             onMouseMove={(e) => onPageMouseMove(e, i)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              // Wait for the click to reach the engine, so the menu sees the new cursor.
+              const { clientX, clientY } = e;
+              void enqueue(async () => undefined).then(() => onContextMenu(clientX, clientY));
+            }}
           >
             <canvas
               ref={(el) => {
@@ -378,6 +502,14 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
                   style={{ left: r.x * pxPerPt, top: r.y * pxPerPt, width: r.width * pxPerPt, height: r.height * pxPerPt }}
                 />
               ))}
+            {object?.page === i && (
+              <ObjectFrame
+                o={object}
+                pxPerPt={pxPerPt}
+                drag={objectDrag}
+                onStart={startObjectDrag}
+              />
+            )}
             {cursor?.page === i && (
               <div
                 ref={cursorEl}
@@ -414,3 +546,59 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     </div>
   );
 });
+
+/** A picture's new size when a corner is dragged by (dx, dy) points, keeping its proportions. */
+function resized(w: number, h: number, corner: Corner, dx: number, dy: number) {
+  const sx = corner === 'ne' || corner === 'se' ? dx : -dx;
+  const sy = corner === 'sw' || corner === 'se' ? dy : -dy;
+  // Follow whichever way the pointer moved most, keeping the aspect ratio.
+  const k = Math.abs(sx / w) > Math.abs(sy / h) ? (w + sx) / w : (h + sy) / h;
+  const scale = Math.max(k, 8 / Math.min(w, h));
+  return { width: Math.round(w * scale * 10) / 10, height: Math.round(h * scale * 10) / 10 };
+}
+
+/** The frame and corner handles around a selected picture, and its outline while dragged. */
+function ObjectFrame({
+  o,
+  pxPerPt,
+  drag,
+  onStart,
+}: {
+  o: { x: number; y: number; width: number; height: number };
+  pxPerPt: number;
+  drag: ObjectDrag | null;
+  onStart(e: React.MouseEvent, kind: ObjectDrag['kind']): void;
+}) {
+  let { x, y, width, height } = o;
+  if (drag) {
+    if (drag.kind === 'move') {
+      x += drag.dx / pxPerPt;
+      y += drag.dy / pxPerPt;
+    } else {
+      const r = resized(width, height, drag.kind, drag.dx / pxPerPt, drag.dy / pxPerPt);
+      if (drag.kind === 'nw' || drag.kind === 'sw') x += width - r.width;
+      if (drag.kind === 'nw' || drag.kind === 'ne') y += height - r.height;
+      width = r.width;
+      height = r.height;
+    }
+  }
+  const handle = (corner: Corner, style: React.CSSProperties) => (
+    <div
+      onMouseDown={(e) => onStart(e, corner)}
+      className="absolute h-2.5 w-2.5 rounded-full border border-white bg-[#376FA3] shadow"
+      style={{ ...style, cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize' }}
+    />
+  );
+  return (
+    <div
+      className="absolute z-10 cursor-move border border-[#376FA3] outline outline-1 outline-white/70"
+      style={{ left: x * pxPerPt, top: y * pxPerPt, width: width * pxPerPt, height: height * pxPerPt, background: drag ? 'rgba(108,159,203,0.12)' : undefined }}
+      onMouseDown={(e) => onStart(e, 'move')}
+    >
+      {handle('nw', { left: -5, top: -5 })}
+      {handle('ne', { right: -5, top: -5 })}
+      {handle('sw', { left: -5, bottom: -5 })}
+      {handle('se', { right: -5, bottom: -5 })}
+    </div>
+  );
+}
