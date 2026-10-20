@@ -582,7 +582,13 @@ export const Ribbon: React.FC<RibbonProps> = ({ t, doc, fonts, recent, onOpenRec
         ))}
       </div>
 
-      <div className="flex h-12 items-center gap-0.5 overflow-x-auto px-3">
+      <div
+        className="flex h-12 items-center gap-0.5 overflow-x-auto px-3"
+        // On a narrow window the commands run past the edge: the mouse wheel scrolls them.
+        onWheel={(e) => {
+          if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) e.currentTarget.scrollLeft += e.deltaY;
+        }}
+      >
         {tab === 'file' && (
           <>
             <Btn wide title={t.newDocument} onClick={() => onAction('new')}>

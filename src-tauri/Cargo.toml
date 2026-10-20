@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -36,6 +36,7 @@ semver = "1"
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8" }
 base64 = "0.22"
 sha2 = "0.10"
+tauri-plugin-window-state = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
