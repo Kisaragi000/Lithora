@@ -37,6 +37,7 @@ pub fn run() {
             recovery::recovery_list,
             recovery::recovery_open,
             recovery::recovery_discard,
+            recovery::recovery_set_interval,
             signatures::signatures_list,
             signatures::signature_add,
             signatures::signature_delete,

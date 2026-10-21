@@ -94,7 +94,7 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify }) => {
     if (info) await update(info);
   };
 
-  const base = 'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium disabled:opacity-60';
+  const base = 'inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-md px-2.5 text-[13px] font-medium disabled:opacity-60';
   if (phase.kind === 'available') {
     return (
       <button type="button" onClick={() => void onClick()} className={`${base} bg-[#B9AEDC]/40 text-[#083B69] hover:bg-[#B9AEDC]/60`} title={t.checkUpdates}>
@@ -110,9 +110,10 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify }) => {
     );
   }
   return (
-    <button type="button" disabled={phase.kind === 'checking'} onClick={() => void onClick()} className={`${base} text-slate-700 hover:bg-slate-100`}>
+    <button type="button" disabled={phase.kind === 'checking'} onClick={() => void onClick()} title={t.checkUpdates} aria-label={t.checkUpdates} className={`${base} text-slate-700 hover:bg-slate-100`}>
       {phase.kind === 'checking' ? <Loader2 className="h-4 w-4 animate-spin text-[#376FA3]" /> : <RefreshCw className="h-4 w-4 text-[#376FA3]" />}
-      {phase.kind === 'checking' ? t.checkingUpdates : t.checkUpdates}
+      {/* On a narrow window only the icon shows. */}
+      <span className="hidden xl:inline">{phase.kind === 'checking' ? t.checkingUpdates : t.checkUpdates}</span>
     </button>
   );
 };
