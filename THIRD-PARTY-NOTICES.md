@@ -30,6 +30,14 @@ Copyright (c) 2026 ArtCraft Team and the craft-libs contributors. Licensed under
 or the Apache License, Version 2.0, at your option. See
 [third-party/craft-libs/](third-party/craft-libs/) for the license texts and notice.
 
+## Harper
+
+Proofread checks English grammar and style with `harper-core`, the engine of Harper
+(https://github.com/Automattic/harper), Copyright (c) Automattic and the Harper contributors.
+Licensed under the Apache License, Version 2.0; see
+[third-party/harper/LICENSE-APACHE](third-party/harper/LICENSE-APACHE). It runs inside Lithora,
+offline.
+
 ## Armenian spelling dictionary (HySpell)
 
 `src-tauri/dictionaries/hy_AM.aff` and `hy_AM.dic` are the Reformed-orthography Hunspell

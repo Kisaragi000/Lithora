@@ -1,5 +1,6 @@
 mod engine;
 mod print;
+mod proofread;
 mod recovery;
 mod signatures;
 mod title_bar;
@@ -29,6 +30,8 @@ pub fn run() {
             engine::engine_save,
             engine::engine_fonts,
             engine::startup_files,
+            proofread::engine_proofread,
+            proofread::engine_proofread_fix,
             print::print_printers,
             print::engine_print,
             recovery::recovery_list,
@@ -47,6 +50,7 @@ pub fn run() {
                 window_layout::restore(&window);
             }
             setup_engine(app.handle());
+            proofread::warm_up();
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

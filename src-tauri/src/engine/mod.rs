@@ -109,7 +109,7 @@ fn system_region() -> Region {
     Region::from_locale_vars(|name| std::env::var(name).ok(), sys_locale::get_locale)
 }
 
-fn lock<'a>(state: &'a State<EngineState>) -> Result<std::sync::MutexGuard<'a, Documents>, String> {
+pub(crate) fn lock<'a>(state: &'a State<EngineState>) -> Result<std::sync::MutexGuard<'a, Documents>, String> {
     state.0.lock().map_err(|_| "the engine stopped".to_string())
 }
 
@@ -132,7 +132,7 @@ fn file_name(s: &Session) -> String {
         .unwrap_or_else(|| "Document.docx".into())
 }
 
-fn doc_state(id: u32, s: &mut Session) -> DocState {
+pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
     let layout = s.layout();
     let pages = layout
         .pages

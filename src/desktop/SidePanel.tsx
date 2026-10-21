@@ -3,12 +3,13 @@
  * to it) and Comments.
  */
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, History as HistoryIcon, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
+import { CheckCircle2, History as HistoryIcon, MessageSquare, RotateCcw, SpellCheck, Trash2, X } from 'lucide-react';
 import type { Language } from '../types/document';
-import { DocState, engine } from './engine';
+import { DocState, ProofIssue, engine } from './engine';
+import { ProofreadPanel } from './Proofread';
 import type { Strings } from './strings';
 
-export type PanelKind = 'history' | 'comments';
+export type PanelKind = 'history' | 'comments' | 'proofread';
 
 /** One change in the History panel. */
 export interface HistoryState {
@@ -119,6 +120,7 @@ export function SidePanel({
   onUndoTo,
   onRedo,
   onReply,
+  proofread,
 }: {
   t: Strings;
   lang: Language;
@@ -133,6 +135,13 @@ export function SidePanel({
   /** Redo this many steps. */
   onRedo(count: number): void;
   onReply(id: number): void;
+  /** What the Proofread tab does in the document. */
+  proofread: {
+    onSelect(issue: ProofIssue): void;
+    onFix(issue: ProofIssue, replacement: string): void;
+    onIgnoreWord(word: string): void;
+    onFixAll(issues: ProofIssue[]): void;
+  };
 }) {
   const [comments, setComments] = useState<CommentInfo[]>([]);
 
@@ -171,15 +180,18 @@ export function SidePanel({
   const { done, undone } = history;
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l border-slate-200 bg-white">
+    <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
       <div className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
         {tab('history', t.history, <HistoryIcon className="h-4 w-4" />)}
         {tab('comments', t.comments, <MessageSquare className="h-4 w-4" />)}
+        {tab('proofread', t.proofread, <SpellCheck className="h-4 w-4" />)}
         <button type="button" onClick={onClose} title={t.close} aria-label={t.close} className="ml-auto rounded p-1 text-slate-500 hover:bg-slate-100">
           <X className="h-4 w-4" />
         </button>
       </div>
-      {kind === 'history' ? (
+      {kind === 'proofread' ? (
+        <ProofreadPanel t={t} doc={doc} {...proofread} />
+      ) : kind === 'history' ? (
         <div className="min-h-0 flex-1 overflow-auto p-2">
           <p className="mb-2 px-1 text-[12px] leading-snug text-slate-500">{t.historyHint}</p>
           <ol className="flex flex-col gap-0.5 text-[13px]">

@@ -57,6 +57,8 @@ export interface PageViewHandle {
   command(name: string, params?: Record<string, unknown>, keepFocus?: boolean): Promise<unknown>;
   /** Run several commands as one batch, in order (each still its own undo step). */
   commands(list: [string, Record<string, unknown>?][]): Promise<void>;
+  /** Make an edit with the engine directly, in turn with typing (Proofread's fixes). */
+  edit(action: () => Promise<DocState | null>): Promise<void>;
   copy(): Promise<void>;
   cut(): Promise<void>;
   focus(): void;
@@ -335,7 +337,11 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     else if (answer?.text) await writeText(answer.text);
   }, [command]);
 
-  useImperativeHandle(ref, () => ({ command, commands, copy, cut, focus }), [command, commands, copy, cut, focus]);
+  const edit = useCallback(async (action: () => Promise<DocState | null>) => {
+    await run(action);
+  }, [run]);
+
+  useImperativeHandle(ref, () => ({ command, commands, edit, copy, cut, focus }), [command, commands, edit, copy, cut, focus]);
 
   // Start typing straight away in a newly shown document.
   useEffect(() => {

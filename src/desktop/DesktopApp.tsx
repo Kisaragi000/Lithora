@@ -7,12 +7,12 @@ import React, { useCallback, useDeferredValue, useEffect, useRef, useState } fro
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ClipboardPaste, Copy, FileText, FolderOpen, Globe, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, X } from 'lucide-react';
+import { ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
 import { listenForFileDrops } from './fileDrop';
-import { DocState, engine, OPEN_EXTENSIONS, RecoveredDoc, SAVE_FILTERS } from './engine';
+import { DocState, engine, OPEN_EXTENSIONS, ProofIssue, RecoveredDoc, SAVE_FILTERS } from './engine';
 import { PageView, PageViewHandle } from './PageView';
 import { Ribbon, RibbonAction } from './Ribbon';
 import { strings } from './strings';
@@ -339,7 +339,14 @@ export const DesktopApp: React.FC = () => {
           if (doc) setDialog({ kind: 'link' });
           return true;
         case 'F7':
+        case 'Mod+Alt+S':
           if (doc) void spellingRef.current();
+          return true;
+        case 'Mod+Alt+P':
+          if (doc) setPanel((p) => (p === 'proofread' ? null : 'proofread'));
+          return true;
+        case 'Mod+Alt+H':
+          if (doc) setPanel((p) => (p === 'history' ? null : 'history'));
           return true;
         case 'Mod+Shift+G':
           if (doc) void wordCountRef.current();
@@ -366,9 +373,9 @@ export const DesktopApp: React.FC = () => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLTextAreaElement) return;
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
+      if (!mod && e.key !== 'F7') return;
       const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : e.key;
-      if (shortcut(`Mod+${e.shiftKey ? 'Shift+' : ''}${key}`)) e.preventDefault();
+      if (shortcut(`${mod ? 'Mod+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${key}`)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -532,6 +539,54 @@ export const DesktopApp: React.FC = () => {
     return () => clearTimeout(timer);
   }, [active]);
 
+  /** Replace every misspelling that has a suggestion with its first one, as one Undo step. */
+  const fixAllSpelling = async (found?: ProofIssue[]) => {
+    const doc = docsRef.current.find((d) => d.id === activeId);
+    if (!doc) return;
+    const list = (found ?? (await engine.proofread(doc.id).catch(() => [] as ProofIssue[]))).filter(
+      (i) => i.autoFix,
+    );
+    if (list.length === 0) {
+      setNotice({ text: t.noMisspellings });
+      return;
+    }
+    const sure = await ask(t.fixAllConfirm.replace('{n}', String(list.length)), { title: t.fixAllSpelling, kind: 'info', okLabel: t.fixAll, cancelLabel: t.cancel });
+    if (!sure) return;
+    const fixes = list.map((i) => ({ start: i.start, end: i.end, text: i.text, replacement: i.suggestions[0] }));
+    await view.current?.edit(() => engine.proofreadFix(doc.id, fixes));
+    setNotice({ text: t.fixedN.replace('{n}', String(list.length)) });
+  };
+
+  const proofreadActions = {
+    onSelect: (i: ProofIssue) => onCommand('select.range', { anchor: i.start, focus: i.end }),
+    onFix: (i: ProofIssue, replacement: string) => {
+      if (!active) return;
+      const id = active.id;
+      void view.current?.edit(() => engine.proofreadFix(id, [{ start: i.start, end: i.end, text: i.text, replacement }]));
+    },
+    onIgnoreWord: (word: string) => onCommand('review.ignoreAll', { word }),
+    onFixAll: (list: ProofIssue[]) => void fixAllSpelling(list),
+  };
+
+  /** The Spelling menu under its button in the title bar. */
+  const spellingMenuOpen = useRef(false);
+  const openSpellingMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (spellingMenuOpen.current) {
+      spellingMenuOpen.current = false;
+      return;
+    }
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({
+      x: r.left,
+      y: r.bottom + 4,
+      items: [
+        { label: t.nextMisspelling, hint: 'F7 · Ctrl+Alt+S', icon: <SpellCheck className="h-3.5 w-3.5" />, onClick: () => void spellingRef.current() },
+        { label: t.proofread, hint: 'Ctrl+Alt+P', icon: <SpellCheck2 className="h-3.5 w-3.5" />, onClick: () => setPanel('proofread') },
+        { label: t.fixAllSpelling, icon: <WandSparkles className="h-3.5 w-3.5" />, onClick: () => void fixAllSpelling() },
+      ],
+    });
+  };
+
   // The ribbon catches up with typing a moment later, so a keystroke only redraws the page.
   const ribbonDoc = useDeferredValue(active);
   const latestHandlers = useRef({ openPaths, onCommand, onAction: (_: RibbonAction) => {} });
@@ -629,6 +684,30 @@ export const DesktopApp: React.FC = () => {
           {active?.name}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={!active}
+            title={`${t.history} (Ctrl+Alt+H)`}
+            onClick={() => setPanel((p) => (p === 'history' ? null : 'history'))}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium hover:bg-slate-100 disabled:opacity-40 ${
+              panel === 'history' ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'
+            }`}
+          >
+            <History className="h-4 w-4 text-[#376FA3]" /> {t.history}
+          </button>
+          <button
+            type="button"
+            disabled={!active}
+            onMouseDown={() => (spellingMenuOpen.current = menu !== null)}
+            onClick={openSpellingMenu}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium hover:bg-slate-100 disabled:opacity-40 ${
+              panel === 'proofread' ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'
+            }`}
+          >
+            <SpellCheck className="h-4 w-4 text-[#376FA3]" /> {t.spelling}
+            <ChevronDown className="h-3 w-3 opacity-60" />
+          </button>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
           <button
             type="button"
             onClick={() => void openFiles()}
@@ -766,6 +845,7 @@ export const DesktopApp: React.FC = () => {
               onUndoTo={(count) => onCommand('edit.undoTo', { count })}
               onRedo={(count) => void view.current?.commands(Array.from({ length: count }, () => ['edit.redo'] as [string]))}
               onReply={(id) => setDialog({ kind: 'reply', id })}
+              proofread={proofreadActions}
             />
           )}
         </div>

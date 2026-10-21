@@ -16,7 +16,6 @@ import {
   Clock,
   FileSignature,
   Hash,
-  History,
   Link2,
   ListChecks,
   MessageSquarePlus,
@@ -26,7 +25,6 @@ import {
   PanelTop,
   Printer,
   Search,
-  SpellCheck,
   Trash2,
   X as XIcon,
   XCircle,
@@ -938,9 +936,6 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
 
         {tab === 'review' && (
           <>
-            <Btn wide title={`${t.spelling} (F7)`} disabled={none} onClick={() => onAction('spelling')}>
-              <SpellCheck className="h-4 w-4" /> {t.spelling}
-            </Btn>
             <Btn wide title={t.wordCount} disabled={none} onClick={() => onAction('wordCount')}>
               <BookOpenCheck className="h-4 w-4" /> {t.wordCount}
             </Btn>
@@ -998,10 +993,6 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
                 </div>
               )}
             </Popover>
-            <Divider />
-            <Btn wide title={t.history} disabled={none} onClick={() => onAction('history')}>
-              <History className="h-4 w-4" /> {t.history}
-            </Btn>
           </>
         )}
 
