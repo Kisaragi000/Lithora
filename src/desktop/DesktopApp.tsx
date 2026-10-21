@@ -7,7 +7,7 @@ import React, { useCallback, useDeferredValue, useEffect, useRef, useState } fro
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
+import { CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
@@ -21,6 +21,7 @@ import { ContextMenu, MenuItem } from './ContextMenu';
 import { LinkDialog, PrintDialog, RecoveryDialog, SymbolDialog, TextDialog, WordCountDialog, WordCountInfo } from './Dialogs';
 import { FindBar } from './FindBar';
 import { HistoryState, PanelKind, SidePanel } from './SidePanel';
+import { SettingsMenu, autosaveLabel, storeAutosave, storedAutosave } from './Settings';
 import { SignatureDialog } from './SignatureDialog';
 
 const LANGUAGE_KEY = 'lithora_ui_language';
@@ -92,6 +93,8 @@ export const DesktopApp: React.FC = () => {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [findBar, setFindBar] = useState<'find' | 'replace' | null>(null);
   const [panel, setPanel] = useState<PanelKind | null>(null);
+  /** AutoSave: seconds between recovery copies of unsaved changes. */
+  const [autosave, setAutosave] = useState(storedAutosave);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   /** The status bar's word count: the document's, and the selection's when there is one. */
   const [words, setWords] = useState<{ total: number; selected: number | null } | null>(null);
@@ -112,6 +115,11 @@ export const DesktopApp: React.FC = () => {
     }
     document.documentElement.lang = lang;
   }, [lang, zoom]);
+
+  useEffect(() => {
+    storeAutosave(autosave);
+    void engine.setRecoveryInterval(autosave).catch(() => undefined);
+  }, [autosave]);
 
   useEffect(() => {
     try {
@@ -443,6 +451,14 @@ export const DesktopApp: React.FC = () => {
       { label: t.paste2, icon: <ClipboardPaste className="h-3.5 w-3.5" />, onClick: () => void onAction('paste') },
     );
     if (doc.object) items.push({ label: t.deleteObject, onClick: () => onCommand('text.delete') });
+    if (doc.selection.length > 0 && !doc.object) {
+      items.push(
+        { separator: true },
+        { label: t.caseUpper, icon: <CaseSensitive className="h-3.5 w-3.5" />, onClick: () => onCommand('format.changeCase', { mode: 'upper' }) },
+        { label: t.caseLower, onClick: () => onCommand('format.changeCase', { mode: 'lower' }) },
+        { label: t.caseTitle, onClick: () => onCommand('format.changeCase', { mode: 'title' }) },
+      );
+    }
     if (doc.inTable) {
       items.push(
         { separator: true },
@@ -695,6 +711,7 @@ export const DesktopApp: React.FC = () => {
           >
             <History className="h-4 w-4 text-[#376FA3]" /> {t.history}
           </button>
+          <SettingsMenu t={t} autosave={autosave} onAutosave={setAutosave} />
           <button
             type="button"
             disabled={!active}
@@ -752,7 +769,7 @@ export const DesktopApp: React.FC = () => {
       </header>
 
       {/* Tabs */}
-      <div className="flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
+      <div className="lithora-slim-scroll flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
         {docs.map((d) => (
           <div
             key={d.id}
@@ -805,6 +822,7 @@ export const DesktopApp: React.FC = () => {
         onClearRecent={ribbonClearRecent}
         onCommand={ribbonCommand}
         onAction={ribbonAction}
+        recoveryEvery={autosaveLabel(t, autosave).toLocaleLowerCase(lang)}
       />
 
       {active && findBar && (

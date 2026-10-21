@@ -1,8 +1,10 @@
 //! AutoRecover: every open document with unsaved changes keeps a copy in the app's data folder
-//! (WordCraft's recovery store), refreshed every few seconds while it is edited. Saving or
-//! closing it on purpose removes the copy. When Lithora starts after a crash, the copies left
-//! behind are offered back.
+//! (WordCraft's recovery store), refreshed every few minutes while it is edited (5 by default;
+//! Settings changes it). Saving or closing it on purpose removes the copy. When Lithora starts
+//! after a crash, the copies left behind are offered back.
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -11,15 +13,41 @@ use wordcraft_engine::Session;
 
 use crate::engine::{DocState, EngineState, add_to};
 
+/// How often a document with unsaved changes gets a fresh recovery copy, in seconds.
+static INTERVAL_SECS: AtomicU64 = AtomicU64::new(300);
+
+/// Set how often recovery copies are made (20 seconds to an hour).
+#[tauri::command]
+pub fn recovery_set_interval(seconds: u64) {
+    INTERVAL_SECS.store(seconds.clamp(20, 3600), Ordering::Relaxed);
+}
+
 /// Keep every document's copy up to date, from a background thread.
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
+        // When each document's changes were last copied (or first seen unsaved).
+        let mut copied: HashMap<u32, Instant> = HashMap::new();
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let state = app.state::<EngineState>();
             let Ok(mut docs) = state.lock() else { return };
-            for s in docs.sessions.values_mut() {
-                s.recovery_tick();
+            let interval = Duration::from_secs(INTERVAL_SECS.load(Ordering::Relaxed));
+            let now = Instant::now();
+            copied.retain(|id, _| docs.sessions.get(id).is_some_and(|s| s.dirty));
+            for (id, s) in docs.sessions.iter_mut() {
+                if !s.dirty {
+                    // Saved: the copy goes.
+                    s.recovery_tick();
+                    continue;
+                }
+                let since = *copied.entry(*id).or_insert(now);
+                if now.duration_since(since) >= interval {
+                    s.recovery_tick();
+                    // The copy is made (or under way): wait a whole interval again.
+                    if s.recovery_wait().is_none() {
+                        copied.insert(*id, now);
+                    }
+                }
             }
         }
     });

@@ -9,6 +9,7 @@ import {
   Baseline,
   BookOpenCheck,
   Bold,
+  CaseSensitive,
   Check,
   CheckCheck,
   ChevronLeft,
@@ -96,9 +97,20 @@ interface RibbonProps {
   onClearRecent(): void;
   onCommand(name: string, params?: Record<string, unknown>): void;
   onAction(action: RibbonAction): void;
+  /** How often recovery copies are kept, as a phrase ("every 5 minutes"). */
+  recoveryEvery: string;
 }
 
 type Tab = 'file' | 'home' | 'insert' | 'layout' | 'review' | 'table' | 'headerFooter';
+
+/** The Change case choices: the engine's mode and the label's string key. */
+export const CASES = [
+  ['sentence', 'caseSentence'],
+  ['lower', 'caseLower'],
+  ['upper', 'caseUpper'],
+  ['title', 'caseTitle'],
+  ['toggle', 'caseToggle'],
+] as const;
 
 const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3];
 
@@ -174,7 +186,7 @@ function Divider() {
  * A floating panel under `anchor`, drawn on top of everything. It lives outside the ribbon
  * because the ribbon row scrolls sideways, which would clip anything hanging below it.
  */
-function FloatingPanel({
+export function FloatingPanel({
   anchor,
   onClose,
   children,
@@ -526,7 +538,7 @@ function PageNumberMenu({
 }
 
 /** Redrawn only when what it shows changes, and after typing has gone on screen (see DesktopApp). */
-export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction }: RibbonProps) {
+export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction, recoveryEvery }: RibbonProps) {
   const [tab, setTab] = useState<Tab>('home');
   const f = doc?.format ?? null;
   const none = !doc;
@@ -582,7 +594,7 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
       </div>
 
       <div
-        className="flex h-12 items-center gap-0.5 overflow-x-auto px-3"
+        className="lithora-slim-scroll flex h-12 items-center gap-0.5 overflow-x-auto px-3"
         // On a narrow window the commands run past the edge: the mouse wheel scrolls them.
         onWheel={(e) => {
           if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) e.currentTarget.scrollLeft += e.deltaY;
@@ -651,7 +663,7 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Btn wide title={t.exportPdf} disabled={none} onClick={() => onAction('exportPdf')}>
               <FileDown className="h-4 w-4" /> {t.exportPdf}
             </Btn>
-            <span className="ml-3 hidden text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote}</span>
+            <span className="ml-3 hidden text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote.replace('{every}', recoveryEvery)}</span>
           </>
         )}
 
@@ -768,6 +780,23 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
                   >
                     {t.noHighlight}
                   </button>
+                </div>
+              )}
+            </Popover>
+            <Popover title={`${t.changeCase} (Shift+F3)`} disabled={none} label={<CaseSensitive className="h-4 w-4" />}>
+              {(close) => (
+                <div className="w-52">
+                  {CASES.map(([mode, key]) => (
+                    <MenuRow
+                      key={mode}
+                      onClick={() => {
+                        onCommand('format.changeCase', { mode });
+                        close();
+                      }}
+                    >
+                      {t[key]}
+                    </MenuRow>
+                  ))}
                 </div>
               )}
             </Popover>

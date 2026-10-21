@@ -143,6 +143,8 @@ export const engine = {
   addSignature: (data: string) => invoke<string>('signature_add', { data }),
   deleteSignature: (id: string) => invoke<void>('signature_delete', { id }),
   startupFiles: () => invoke<string[]>('startup_files'),
+  /** How often recovery copies of unsaved changes are kept, in seconds. */
+  setRecoveryInterval: (seconds: number) => invoke<void>('recovery_set_interval', { seconds }),
   proofread: (doc: number) => invoke<ProofIssue[]>('engine_proofread', { doc }),
   /** Make these changes as one Undo step. */
   proofreadFix: (doc: number, fixes: ProofFix[]) => invoke<DocState>('engine_proofread_fix', { doc, fixes }),
