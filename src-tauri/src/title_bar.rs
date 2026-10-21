@@ -1,8 +1,10 @@
-//! Gives the window title bar Lithora's colors on Windows 11.
+//! The window frame on Windows.
 //!
-//! The window is set to the light theme in tauri.conf.json, so Windows 10 and 11
-//! draw a light title bar even when the system uses dark mode. Windows 11 also
-//! lets an app pick the exact caption colors, which this module does.
+//! The system title bar is turned off: it repeated Lithora's logo and name right above the
+//! app's own header, which now carries minimize, maximize and close (WindowControls.tsx) and
+//! moves the window when dragged. The window keeps its shadow and resize edges, and on
+//! Windows 11 its thin border gets the header's border color. If the frame ever comes back
+//! (an old system), the light theme and these caption colors keep it in Lithora's style.
 
 #[cfg(windows)]
 pub fn apply(window: &tauri::WebviewWindow) {
@@ -18,6 +20,9 @@ pub fn apply(window: &tauri::WebviewWindow) {
     const CAPTION: u32 = colorref(0xFFFFFF); // white, like the app header
     const TEXT: u32 = colorref(0x083B69); // logo navy
     const BORDER: u32 = colorref(0xE2E8F0); // the header's bottom border
+
+    let _ = window.set_decorations(false);
+    let _ = window.set_shadow(true);
 
     let Ok(hwnd) = window.hwnd() else { return };
     for (attribute, color) in [

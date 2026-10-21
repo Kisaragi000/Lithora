@@ -21,6 +21,7 @@ import { ContextMenu, MenuItem } from './ContextMenu';
 import { LinkDialog, PrintDialog, RecoveryDialog, SymbolDialog, TextDialog, WordCountDialog, WordCountInfo } from './Dialogs';
 import { FindBar } from './FindBar';
 import { HistoryState, PanelKind, SidePanel } from './SidePanel';
+import { OWN_TITLE_BAR, WindowControls } from './WindowControls';
 import { SettingsMenu, autosaveLabel, storeAutosave, storedAutosave } from './Settings';
 import { SignatureDialog } from './SignatureDialog';
 
@@ -688,18 +689,22 @@ export const DesktopApp: React.FC = () => {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#E9EEF5] font-sans text-slate-800">
       {/* Header */}
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 select-none">
-        <div className="flex items-center gap-2">
+      {/* On Windows this is also the window's title bar: drag it to move the window, double-click to maximize. */}
+      <header
+        data-tauri-drag-region
+        className={`flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white pl-4 select-none ${OWN_TITLE_BAR ? '' : 'pr-4'}`}
+      >
+        <div data-tauri-drag-region className="flex items-center gap-2">
           <LithoraLogo className="h-6 w-6" />
           <span className="text-[16px] tracking-tight text-[#083B69]" style={{ fontFamily: "'Sora', sans-serif", fontWeight: 600 }}>
             Lithora
           </span>
         </div>
         <span className="h-5 w-px bg-slate-200" />
-        <span className="min-w-0 truncate text-[13px] font-medium text-slate-700" title={active?.path ?? active?.name}>
+        <span data-tauri-drag-region className="min-w-0 truncate text-[13px] font-medium text-slate-700" title={active?.path ?? active?.name}>
           {active?.name}
         </span>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div data-tauri-drag-region className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
             disabled={!active}
@@ -766,6 +771,7 @@ export const DesktopApp: React.FC = () => {
             ))}
           </div>
         </div>
+        {OWN_TITLE_BAR && <WindowControls t={t} />}
       </header>
 
       {/* Tabs */}
