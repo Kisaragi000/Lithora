@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.3.2"
+version = "0.3.3"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -37,6 +37,8 @@ craft-print = { git = "https://github.com/storytold/craft-libs", rev = "c3487320
 base64 = "0.22"
 sha2 = "0.10"
 tauri-plugin-window-state = "2"
+# English grammar and style checking for Proofread (Apache-2.0), https://github.com/Automattic/harper
+harper-core = "2.13"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

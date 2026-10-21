@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 
 export type MenuItem =
   | { separator: true }
-  | { label: string; onClick(): void; disabled?: boolean; strong?: boolean; icon?: React.ReactNode; muted?: boolean };
+  | { label: string; onClick(): void; disabled?: boolean; strong?: boolean; icon?: React.ReactNode; muted?: boolean; hint?: string };
 
 export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose(): void }) {
   const menu = useRef<HTMLDivElement>(null);
@@ -62,6 +62,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
           >
             <span className="flex w-4 shrink-0 justify-center text-[#376FA3]">{item.icon}</span>
             <span className="truncate">{item.label}</span>
+            {item.hint && <span className="ml-auto pl-4 text-[11px] text-slate-400">{item.hint}</span>}
           </button>
         ),
       )}

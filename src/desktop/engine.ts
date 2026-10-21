@@ -89,6 +89,32 @@ export interface PageImage {
   band: ImageData | null;
 }
 
+/** A place in the document, as the engine names it. */
+export type Pos = unknown;
+
+/** One issue Proofread found. */
+export interface ProofIssue {
+  start: Pos;
+  end: Pos;
+  text: string;
+  kind: 'spelling' | 'grammar' | 'style';
+  message: string;
+  suggestions: string[];
+  /** The words around it, and where the issue is in them. */
+  context: string;
+  at: [number, number];
+  /** A misspelling Fix all corrects (a close suggestion, not a name). */
+  autoFix: boolean;
+}
+
+/** Replace the text between `start` and `end` (if it still reads `text`). */
+export interface ProofFix {
+  start: Pos;
+  end: Pos;
+  text: string;
+  replacement: string;
+}
+
 interface CommandReply {
   state: DocState;
   result: unknown;
@@ -117,6 +143,9 @@ export const engine = {
   addSignature: (data: string) => invoke<string>('signature_add', { data }),
   deleteSignature: (id: string) => invoke<void>('signature_delete', { id }),
   startupFiles: () => invoke<string[]>('startup_files'),
+  proofread: (doc: number) => invoke<ProofIssue[]>('engine_proofread', { doc }),
+  /** Make these changes as one Undo step. */
+  proofreadFix: (doc: number, fixes: ProofFix[]) => invoke<DocState>('engine_proofread_fix', { doc, fixes }),
   /**
    * Draw one page at `scale` pixels per point. With `have` (the window holds this page as the
    * engine last sent it, at this scale) only the rows that changed come back, or none.

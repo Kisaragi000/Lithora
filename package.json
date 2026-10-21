@@ -1,7 +1,7 @@
 {
   "name": "lithora",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Free, open source multilingual Word and RTF editor for desktop.",
   "license": "MIT OR Apache-2.0",
   "repository": {
