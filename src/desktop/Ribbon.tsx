@@ -64,6 +64,23 @@ import {
   TableCellsSplit,
 } from 'lucide-react';
 import type { DocState } from './engine';
+import { Btn, Divider, FloatingPanel, MenuRow, Popover, SHADES, TEXT_COLORS } from './ribbonParts';
+import {
+  DesignTab,
+  DialogLauncher,
+  FileMore,
+  FormatPainterButton,
+  InsertMore,
+  LayoutMore,
+  ListMenus,
+  type MoreAction,
+  ParagraphBordersMenu,
+  PasteMenu,
+  ReferencesTab,
+  ReviewMore,
+  ViewTab,
+  type Zoom,
+} from './RibbonMore';
 import type { Strings } from './strings';
 
 export type RibbonAction =
@@ -99,9 +116,13 @@ interface RibbonProps {
   onAction(action: RibbonAction): void;
   /** How often recovery copies are kept, as a phrase ("every 5 minutes"). */
   recoveryEvery: string;
+  onMore(action: MoreAction): void;
+  zoom: number;
+  onZoom(zoom: Zoom): void;
+  navOpen: boolean;
 }
 
-type Tab = 'file' | 'home' | 'insert' | 'layout' | 'review' | 'table' | 'headerFooter';
+type Tab = 'file' | 'home' | 'insert' | 'design' | 'layout' | 'references' | 'review' | 'view' | 'table' | 'headerFooter';
 
 /** The Change case choices: the engine's mode and the label's string key. */
 export const CASES = [
@@ -114,28 +135,7 @@ export const CASES = [
 
 const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3];
 
-const SHADES = ['FFFFFF', 'F2F2F2', 'D9D9D9', 'BFBFBF', 'DCE6F2', 'B9CDE5', '6C9FCB', 'E4DFEC', 'B9AEDC', 'FBF8F0', 'FFF2CC', 'E2EFDA', 'FCE4D6', 'FFC7CE'];
-
-/** A row in a drop-down panel. */
-function MenuRow({ children, onClick, active }: { children: React.ReactNode; onClick(): void; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-slate-100 ${active ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
-
-const TEXT_COLORS = [
-  'auto', '000000', '404040', '7F7F7F', 'BFBFBF', 'FFFFFF',
-  'C00000', 'FF0000', 'FFC000', 'FFFF00', '92D050', '00B050',
-  '00B0F0', '0070C0', '002060', '7030A0', '083B69', '376FA3',
-];
 
 const HIGHLIGHTS: [string, string][] = [
   ['yellow', '#FFFF00'], ['brightGreen', '#00FF00'], ['turquoise', '#00FFFF'], ['pink', '#FF00FF'],
@@ -143,162 +143,6 @@ const HIGHLIGHTS: [string, string][] = [
   ['green', '#008000'], ['violet', '#800080'], ['darkRed', '#800000'], ['darkYellow', '#808000'],
   ['gray50', '#808080'], ['gray25', '#C0C0C0'], ['black', '#000000'],
 ];
-
-function Btn({
-  title,
-  onClick,
-  active,
-  disabled,
-  children,
-  wide,
-}: {
-  title: string;
-  onClick(): void;
-  active?: boolean;
-  disabled?: boolean;
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={disabled}
-      // Keep the keyboard in the document while clicking the ribbon.
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] transition-colors disabled:pointer-events-none disabled:opacity-35 ${
-        wide ? 'px-2.5' : 'w-8'
-      } ${active ? 'bg-[#376FA3]/15 text-[#083B69] ring-1 ring-[#376FA3]/40' : 'text-slate-700 hover:bg-[#6C9FCB]/15 hover:text-[#083B69]'}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Divider() {
-  return <span className="mx-1.5 h-6 w-px shrink-0 bg-slate-200" />;
-}
-
-/**
- * A floating panel under `anchor`, drawn on top of everything. It lives outside the ribbon
- * because the ribbon row scrolls sideways, which would clip anything hanging below it.
- */
-export function FloatingPanel({
-  anchor,
-  onClose,
-  children,
-  className = '',
-}: {
-  anchor: HTMLElement;
-  onClose(): void;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const panel = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number }>(() => place(anchor, 0));
-  useLayoutEffect(() => {
-    const update = () => setPos(place(anchor, panel.current?.offsetWidth ?? 0));
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [anchor]);
-  // The wheel scrolls this list itself. Done by hand: in the desktop web view the wheel over a
-  // floating list went to the ribbon behind it instead.
-  useEffect(() => {
-    const el = panel.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const line = e.deltaMode === 1 ? 36 : e.deltaMode === 2 ? el.clientHeight : 1;
-      el.scrollTop += e.deltaY * line;
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
-  useEffect(() => {
-    const away = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!panel.current?.contains(target) && !anchor.contains(target)) onClose();
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('mousedown', away);
-    window.addEventListener('keydown', esc);
-    return () => {
-      window.removeEventListener('mousedown', away);
-      window.removeEventListener('keydown', esc);
-    };
-  }, [anchor, onClose]);
-  return createPortal(
-    <div
-      ref={panel}
-      className={`fixed z-[100] overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2 shadow-xl ${className}`}
-      style={{ left: pos.left, top: pos.top, maxHeight: pos.maxHeight }}
-      // React passes events from a portal up to the component that opened it: keep the wheel
-      // from reaching the ribbon row's own wheel handler.
-      onWheel={(e) => e.stopPropagation()}
-    >
-      {children}
-    </div>,
-    document.body,
-  );
-}
-
-/** Where a panel of `width` goes under `anchor`, kept inside the window. */
-function place(anchor: HTMLElement, width: number) {
-  const r = anchor.getBoundingClientRect();
-  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-  const top = r.bottom + 4;
-  return { left, top, maxHeight: Math.max(120, window.innerHeight - top - 8) };
-}
-
-/** A button that opens a small panel below it. */
-function Popover({
-  title,
-  label,
-  disabled,
-  children,
-}: {
-  title: string;
-  label: React.ReactNode;
-  disabled?: boolean;
-  children: (close: () => void) => React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  return (
-    <>
-      <button
-        ref={button}
-        type="button"
-        title={open ? undefined : title}
-        aria-label={title}
-        aria-expanded={open}
-        disabled={disabled}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen((o) => !o)}
-        className={`inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-[13px] text-slate-700 hover:bg-[#6C9FCB]/15 hover:text-[#083B69] disabled:pointer-events-none disabled:opacity-35 ${
-          open ? 'bg-[#6C9FCB]/15 text-[#083B69]' : ''
-        }`}
-      >
-        {label}
-        <ChevronDown className="h-3 w-3 opacity-60" />
-      </button>
-      {open && button.current && (
-        <FloatingPanel anchor={button.current} onClose={close}>
-          <div onMouseDown={(e) => e.preventDefault()}>{children(close)}</div>
-        </FloatingPanel>
-      )}
-    </>
-  );
-}
 
 /** Fonts most documents use, shown first. Missing ones are drawn with a matching free font. */
 const COMMON_FONTS = [
@@ -557,7 +401,22 @@ function PageNumberMenu({
 }
 
 /** Redrawn only when what it shows changes, and after typing has gone on screen (see DesktopApp). */
-export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpenRecent, onClearRecent, onCommand, onAction, recoveryEvery }: RibbonProps) {
+export const Ribbon = React.memo(function Ribbon({
+  t,
+  doc,
+  fonts,
+  recent,
+  onOpenRecent,
+  onClearRecent,
+  onCommand,
+  onAction,
+  recoveryEvery,
+  onMore,
+  zoom,
+  onZoom,
+  navOpen,
+}: RibbonProps) {
+  const more = { t, doc, onCommand, onMore };
   const [tab, setTab] = useState<Tab>('home');
   const f = doc?.format ?? null;
   const none = !doc;
@@ -570,8 +429,11 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
     ['file', t.file],
     ['home', t.home],
     ['insert', t.insert],
+    ['design', t.design],
     ['layout', t.layout],
+    ['references', t.references],
     ['review', t.review],
+    ['view', t.view],
     ...(inTable ? ([['table', t.tableTab, true]] as [Tab, string, boolean][]) : []),
     ...(inHeaderFooter ? ([['headerFooter', t.headerFooterTab, true]] as [Tab, string, boolean][]) : []),
   ];
@@ -678,13 +540,15 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
               )}
             </Popover>
             <Divider />
+            <FileMore {...more} />
+            <Divider />
             <Btn wide title={`${t.print} (Ctrl+P)`} disabled={none} onClick={() => onAction('print')}>
               <Printer className="h-4 w-4" /> {t.print}
             </Btn>
             <Btn wide title={t.exportPdf} disabled={none} onClick={() => onAction('exportPdf')}>
               <FileDown className="h-4 w-4" /> {t.exportPdf}
             </Btn>
-            <span className="ml-3 hidden text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote.replace('{every}', recoveryEvery)}</span>
+            <span className="ml-3 hidden shrink-0 whitespace-nowrap text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote.replace('{every}', recoveryEvery)}</span>
           </>
         )}
 
@@ -700,12 +564,14 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Btn title={t.paste} disabled={none} onClick={() => onAction('paste')}>
               <ClipboardPaste className="h-4 w-4" />
             </Btn>
+            <PasteMenu {...more} />
             <Btn title={t.cut} disabled={none} onClick={() => onAction('cut')}>
               <Scissors className="h-4 w-4" />
             </Btn>
             <Btn title={t.copy} disabled={none} onClick={() => onAction('copy')}>
               <Copy className="h-4 w-4" />
             </Btn>
+            <FormatPainterButton {...more} />
             <Divider />
             <FontPicker t={t} value={fontValue} fonts={fontOptions} disabled={none} onPick={(name) => onCommand('format.font', { name })} />
             <select
@@ -824,6 +690,7 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Btn title={t.clearFormat} disabled={none} onClick={() => onCommand('format.clear')}>
               <RemoveFormatting className="h-4 w-4" />
             </Btn>
+            <DialogLauncher title={`${t.fontDialog} (Ctrl+D)`} disabled={none} onClick={() => onMore('fontDialog')} />
             <Divider />
             <Btn title={t.alignLeft} active={doc?.align === 'left'} disabled={none} onClick={() => onCommand('para.alignLeft')}>
               <AlignLeft className="h-4 w-4" />
@@ -844,6 +711,7 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Btn title={t.numbering} disabled={none} onClick={() => onCommand('para.numbering')}>
               <ListOrdered className="h-4 w-4" />
             </Btn>
+            <ListMenus {...more} />
             <Btn title={t.outdent} disabled={none} onClick={() => onCommand('para.outdent')}>
               <IndentDecrease className="h-4 w-4" />
             </Btn>
@@ -885,6 +753,8 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
                 </div>
               )}
             </Popover>
+            <ParagraphBordersMenu {...more} />
+            <DialogLauncher title={t.paragraphSettings} disabled={none} onClick={() => onMore('paragraphDialog')} />
             <Divider />
             {(
               [
@@ -964,6 +834,8 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
               <SeparatorHorizontal className="h-4 w-4" /> {t.pageBreak}
             </Btn>
             <Divider />
+            <InsertMore {...more} />
+            <Divider />
             <Btn wide title={`${t.link} (Ctrl+K)`} disabled={none} onClick={() => onAction('link')}>
               <Link2 className="h-4 w-4" /> {t.link}
             </Btn>
@@ -989,6 +861,7 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Btn wide title={t.wordCount} disabled={none} onClick={() => onAction('wordCount')}>
               <BookOpenCheck className="h-4 w-4" /> {t.wordCount}
             </Btn>
+            <ReviewMore {...more} />
             <Divider />
             <Btn wide title={t.newComment} disabled={none} onClick={() => onAction('comment')}>
               <MessageSquarePlus className="h-4 w-4" /> {t.newComment}
@@ -1285,6 +1158,15 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
                       {label}
                     </button>
                   ))}
+                  <div className="my-1 h-px bg-slate-200" />
+                  <MenuRow
+                    onClick={() => {
+                      onMore('pageSetup');
+                      close();
+                    }}
+                  >
+                    {t.customMargins}
+                  </MenuRow>
                 </div>
               )}
             </Popover>
@@ -1298,8 +1180,8 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
             <Divider />
             <Popover title={t.size} disabled={none} label={<span className="px-1">{t.size}</span>}>
               {(close) => (
-                <div className="flex w-32 flex-col">
-                  {['A4', 'A5', 'Letter', 'Legal'].map((name) => (
+                <div className="flex w-44 flex-col">
+                  {['A4', 'A5', 'A3', 'B5', 'Letter', 'Legal', 'Executive', 'Tabloid'].map((name) => (
                     <button
                       key={name}
                       type="button"
@@ -1312,30 +1194,52 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
                       {name}
                     </button>
                   ))}
+                  <div className="my-1 h-px bg-slate-200" />
+                  <MenuRow
+                    onClick={() => {
+                      onMore('pageSetup');
+                      close();
+                    }}
+                  >
+                    {t.morePaperSizes}
+                  </MenuRow>
                 </div>
               )}
             </Popover>
             <Popover title={t.columns} disabled={none} label={<span className="px-1">{t.columns}</span>}>
               {(close) => (
-                <div className="flex w-24 flex-col">
-                  {[1, 2, 3].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
+                <div className="flex w-40 flex-col">
+                  {(
+                    [
+                      [{ count: 1 }, t.colsOne],
+                      [{ count: 2 }, t.colsTwo],
+                      [{ count: 3 }, t.colsThree],
+                      [{ count: 2, preset: 'left' }, t.colsLeft],
+                      [{ count: 2, preset: 'right' }, t.colsRight],
+                      [{ count: 2, separator: true }, t.colsLine],
+                    ] as const
+                  ).map(([params, text]) => (
+                    <MenuRow
+                      key={text}
                       onClick={() => {
-                        onCommand('layout.columns', { count });
+                        onCommand('layout.columns', params);
                         close();
                       }}
-                      className="rounded px-2 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-100"
                     >
-                      {count}
-                    </button>
+                      {text}
+                    </MenuRow>
                   ))}
                 </div>
               )}
             </Popover>
+            <Divider />
+            <LayoutMore {...more} />
           </>
         )}
+
+        {tab === 'design' && <DesignTab {...more} />}
+        {tab === 'references' && <ReferencesTab {...more} />}
+        {tab === 'view' && <ViewTab {...more} zoom={zoom} onZoom={onZoom} navOpen={navOpen} />}
       </div>
     </div>
   );

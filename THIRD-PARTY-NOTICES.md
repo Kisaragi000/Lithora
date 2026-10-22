@@ -36,7 +36,8 @@ Proofread checks English grammar and style with `harper-core`, the engine of Har
 (https://github.com/Automattic/harper), Copyright (c) Automattic and the Harper contributors.
 Licensed under the Apache License, Version 2.0; see
 [third-party/harper/LICENSE-APACHE](third-party/harper/LICENSE-APACHE). It runs inside Lithora,
-offline.
+offline. The English Thesaurus (Review › Thesaurus) uses Harper's word list, `harper-thesaurus`,
+under the same license.
 
 ## Armenian spelling dictionary (HySpell)
 

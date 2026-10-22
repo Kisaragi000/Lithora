@@ -30,12 +30,26 @@ export function Modal({
   }, [onClose]);
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-[#083B69]/25 p-4"
+      className="fixed inset-0 z-[200] flex items-start justify-center bg-[#083B69]/25 p-4 pt-[8vh]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div role="dialog" aria-label={title} className={`flex max-h-[90vh] max-w-full flex-col rounded-xl border border-slate-200 bg-white shadow-2xl ${width}`}>
+      <div
+        role="dialog"
+        aria-label={title}
+        className={`flex max-h-[86vh] max-w-full flex-col rounded-xl border border-slate-200 bg-white shadow-2xl ${width}`}
+        onKeyDown={(e) => {
+          // Enter in a text box presses the dialog's main button, as in Word.
+          const box = e.target as HTMLElement;
+          if (e.key !== 'Enter' || e.defaultPrevented || e.nativeEvent.isComposing || box.tagName !== 'INPUT') return;
+          if (['checkbox', 'radio', 'button', 'file'].includes((box as HTMLInputElement).type)) return;
+          const ok = e.currentTarget.querySelector<HTMLButtonElement>('button[data-primary]:not(:disabled)');
+          if (!ok) return;
+          e.preventDefault();
+          ok.click();
+        }}
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
           <h2 className="text-[14px] font-semibold text-[#083B69]">{title}</h2>
           <button type="button" onClick={onClose} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Close">
@@ -54,6 +68,7 @@ export function PrimaryButton({ children, onClick, disabled }: { children: React
   return (
     <button
       type="button"
+      data-primary
       disabled={disabled}
       onClick={onClick}
       className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#083B69] px-3.5 text-[13px] font-medium text-white hover:bg-[#0B4A84] disabled:opacity-40"

@@ -18,6 +18,9 @@ use wordcraft_engine::doc::{Block, PartKind, Pos, StoryRef};
 use wordcraft_engine::render::{RenderOptions, render_page};
 use wordcraft_engine::{Region, Session};
 
+mod extra;
+pub use extra::*;
+
 /// The open documents, by id.
 #[derive(Default)]
 pub struct EngineState(Mutex<Documents>);
@@ -95,6 +98,12 @@ pub struct DocState {
     pub object: Option<Mark>,
     /// The line spacing of the cursor's paragraph, as a multiple (1, 1.15, 1.5, 2…), when it is one.
     pub line_spacing: Option<f32>,
+    /// Format Painter is holding formatting to paint onto the next selection.
+    pub painter: bool,
+    /// Formatting marks (¶) are shown.
+    pub marks: bool,
+    /// The document is saved with a password.
+    pub encrypted: bool,
 }
 
 /// What a command returns: the new state, and the command's own answer (Copy's text, for one).
@@ -105,21 +114,26 @@ pub struct CommandReply {
 }
 
 /// The paper and units of the computer's region (A4 in most of the world, Letter in the US).
-fn system_region() -> Region {
+pub(crate) fn system_region() -> Region {
     Region::from_locale_vars(|name| std::env::var(name).ok(), sys_locale::get_locale)
 }
 
-pub(crate) fn lock<'a>(state: &'a State<EngineState>) -> Result<std::sync::MutexGuard<'a, Documents>, String> {
+pub(crate) fn lock<'a>(
+    state: &'a State<EngineState>,
+) -> Result<std::sync::MutexGuard<'a, Documents>, String> {
     state.0.lock().map_err(|_| "the engine stopped".to_string())
 }
 
-fn with_doc<T>(
+pub(crate) fn with_doc<T>(
     state: &State<EngineState>,
     doc: u32,
     f: impl FnOnce(&mut Session) -> Result<T, String>,
 ) -> Result<T, String> {
     let mut docs = lock(state)?;
-    let session = docs.sessions.get_mut(&doc).ok_or("that document is closed")?;
+    let session = docs
+        .sessions
+        .get_mut(&doc)
+        .ok_or("that document is closed")?;
     f(session)
 }
 
@@ -137,7 +151,10 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
     let pages = layout
         .pages
         .iter()
-        .map(|p| PageSize { width: p.w, height: p.h })
+        .map(|p| PageSize {
+            width: p.w,
+            height: p.h,
+        })
         .collect();
     let sel = s.sel_ends().clone();
     let hint = s.page_hint;
@@ -155,7 +172,13 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         let rects = layout
             .selection_rects(&s.doc, &a, &b, hint)
             .into_iter()
-            .map(|(page, r)| Mark { page, x: r.x, y: r.y, width: r.w, height: r.h })
+            .map(|(page, r)| Mark {
+                page,
+                x: r.x,
+                y: r.y,
+                width: r.w,
+                height: r.h,
+            })
             .collect();
         (None, rects)
     };
@@ -182,10 +205,17 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         in_table: s.sel.focus.path.cell().is_some(),
         track_changes: s.doc.settings.track_changes,
         object,
-        line_spacing: s.doc.para_at(&s.sel.focus).and_then(|p| p.props.line_spacing).and_then(|ls| match ls {
-            wordcraft_engine::doc::props::LineSpacing::Multiple(m) => Some(m),
-            _ => None,
-        }),
+        line_spacing: s
+            .doc
+            .para_at(&s.sel.focus)
+            .and_then(|p| p.props.line_spacing)
+            .and_then(|ls| match ls {
+                wordcraft_engine::doc::props::LineSpacing::Multiple(m) => Some(m),
+                _ => None,
+            }),
+        painter: s.painter.is_some(),
+        marks: s.view.marks,
+        encrypted: s.password.is_some(),
     }
 }
 
@@ -214,14 +244,20 @@ fn selected_object(s: &Session, layout: &wordcraft_engine::layout::DocLayout) ->
     if hit.text_box.is_some() {
         return None;
     }
-    Some(Mark { page: hit.page, x: hit.rect.x, y: hit.rect.y, width: hit.rect.w, height: hit.rect.h })
+    Some(Mark {
+        page: hit.page,
+        x: hit.rect.x,
+        y: hit.rect.y,
+        width: hit.rect.w,
+        height: hit.rect.h,
+    })
 }
 
-fn run(s: &mut Session, id: &str, params: Value) -> Result<Value, String> {
+pub(crate) fn run(s: &mut Session, id: &str, params: Value) -> Result<Value, String> {
     s.run(id, &params).map_err(|e| e.to_string())
 }
 
-fn add(state: &State<EngineState>, session: Session) -> Result<DocState, String> {
+pub(crate) fn add(state: &State<EngineState>, session: Session) -> Result<DocState, String> {
     let mut docs = lock(state)?;
     add_to(&mut docs, session)
 }
@@ -245,7 +281,7 @@ pub(crate) fn add_to(docs: &mut Documents, mut session: Session) -> Result<DocSt
 }
 
 /// The signed-in user's name, for comments and tracked changes.
-fn user_name() -> Option<String> {
+pub(crate) fn user_name() -> Option<String> {
     ["USERNAME", "USER", "LOGNAME"]
         .iter()
         .find_map(|v| std::env::var(v).ok())
@@ -255,10 +291,31 @@ fn user_name() -> Option<String> {
 
 /// Open a document in a new tab.
 #[tauri::command(async)]
-pub fn engine_open(state: State<EngineState>, path: String) -> Result<DocState, String> {
+pub fn engine_open(
+    state: State<EngineState>,
+    path: String,
+    password: Option<String>,
+) -> Result<DocState, String> {
     let path = PathBuf::from(path);
-    let (doc, _encrypted) = wordcraft_engine::io::open_path_in(&path, None, &system_region())?;
+    let password = password.filter(|p| !p.is_empty());
+    let (doc, encrypted) =
+        wordcraft_engine::io::open_path_in(&path, password.as_deref(), &system_region()).map_err(
+            |e| {
+                // The interface asks for the password on these.
+                if wordcraft_engine::io::needs_password(&e) {
+                    "PASSWORD_REQUIRED".to_string()
+                } else if wordcraft_engine::io::wrong_password(&e) {
+                    "WRONG_PASSWORD".to_string()
+                } else {
+                    e
+                }
+            },
+        )?;
     let mut session = Session::new(doc);
+    if encrypted && let Some(pw) = &password {
+        // Saved again with the same password, as Word does.
+        session.password = Some(wordcraft_engine::io::Password::new(pw));
+    }
     session.system_region = system_region();
     session.path = Some(path);
     add(&state, session)
@@ -314,20 +371,46 @@ pub fn engine_render_page(
 }
 
 /// [`engine_render_page`]'s reply.
-fn paint(docs: &mut Documents, doc: u32, page: usize, scale: f32, have: bool) -> Result<Vec<u8>, String> {
-    let s = docs.sessions.get_mut(&doc).ok_or("that document is closed")?;
+pub(crate) fn paint(
+    docs: &mut Documents,
+    doc: u32,
+    page: usize,
+    scale: f32,
+    have: bool,
+) -> Result<Vec<u8>, String> {
+    let s = docs
+        .sessions
+        .get_mut(&doc)
+        .ok_or("that document is closed")?;
     let layout = s.layout();
     let p = layout.pages.get(page).ok_or("no such page")?;
     let mut opts = RenderOptions::default();
+    opts.display.marks = s.view.marks;
     // Editing a header or footer dims the body, as in Word.
-    if matches!(s.sel.focus.story, StoryRef::Part(_)) && matches!(story_kind(s), "header" | "footer") {
+    if matches!(s.sel.focus.story, StoryRef::Part(_))
+        && matches!(story_kind(s), "header" | "footer")
+    {
         opts.display.dim_header = false;
         opts.display.dim_body = true;
     }
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (page_content_key(p), p.number, layout.pages.len(), scale.to_bits(), opts.display.dim_body).hash(&mut h);
+        (
+            page_content_key(p),
+            p.number,
+            layout.pages.len(),
+            scale.to_bits(),
+            opts.display.dim_body,
+            opts.display.marks,
+        )
+            .hash(&mut h);
+        // Drawn from the document's settings rather than the laid-out page.
+        format!(
+            "{:?}{:?}",
+            s.doc.settings.page_color, s.doc.settings.watermark
+        )
+        .hash(&mut h);
         h.finish()
     };
     let slot = (doc, page);
@@ -345,17 +428,40 @@ fn paint(docs: &mut Documents, doc: u32, page: usize, scale: f32, have: bool) ->
         Some(prev) if prev.width == r.width && prev.height == r.height => {
             let same = |i: &usize| prev.rows[*i] == rows[*i];
             let first = (0..rows.len()).find(|i| !same(i)).unwrap_or(rows.len());
-            let end = (first..rows.len()).rev().find(|i| !same(i)).map_or(first, |i| i + 1);
+            let end = (first..rows.len())
+                .rev()
+                .find(|i| !same(i))
+                .map_or(first, |i| i + 1);
             (first, end)
         }
         _ => (0, rows.len()),
     };
-    let reply = page_reply(r.width, r.height, first as u32, (end - first) as u32, &pixels[first * row_len..end * row_len]);
-    docs.painted.insert(slot, Painted { key, width: r.width, height: r.height, rows });
+    let reply = page_reply(
+        r.width,
+        r.height,
+        first as u32,
+        (end - first) as u32,
+        &pixels[first * row_len..end * row_len],
+    );
+    docs.painted.insert(
+        slot,
+        Painted {
+            key,
+            width: r.width,
+            height: r.height,
+            rows,
+        },
+    );
     Ok(reply)
 }
 
-fn page_reply(width: u32, height: u32, first: u32, count: u32, pixels: &[u8]) -> Vec<u8> {
+pub(crate) fn page_reply(
+    width: u32,
+    height: u32,
+    first: u32,
+    count: u32,
+    pixels: &[u8],
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(16 + pixels.len());
     for n in [width, height, first, count] {
         out.extend_from_slice(&n.to_le_bytes());
@@ -391,21 +497,73 @@ fn page_content_key(page: &wordcraft_engine::layout::Page) -> u64 {
         list.len().hash(&mut h);
         for it in list.iter() {
             match it {
-                Placed::Lines { para, l0, l1, x, y, turn, .. } => {
-                    (Arc::as_ptr(para) as usize, l0, l1, x.to_bits(), y.to_bits(), turn).hash(&mut h);
+                Placed::Lines {
+                    para,
+                    l0,
+                    l1,
+                    x,
+                    y,
+                    turn,
+                    ..
+                } => {
+                    (
+                        Arc::as_ptr(para) as usize,
+                        l0,
+                        l1,
+                        x.to_bits(),
+                        y.to_bits(),
+                        turn,
+                    )
+                        .hash(&mut h);
                 }
                 Placed::Fill { rect, color } => format!("{rect:?}{color:?}").hash(&mut h),
-                Placed::Rule { x0, y0, x1, y1, border } => format!("{x0}{y0}{x1}{y1}{border:?}").hash(&mut h),
-                Placed::Image { rect, media, spin, .. } => format!("{rect:?}{media}{spin:?}").hash(&mut h),
-                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra, .. } => {
+                Placed::Rule {
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    border,
+                } => format!("{x0}{y0}{x1}{y1}{border:?}").hash(&mut h),
+                Placed::Image {
+                    rect, media, spin, ..
+                } => format!("{rect:?}{media}{spin:?}").hash(&mut h),
+                Placed::Shape {
+                    rect,
+                    kind,
+                    fill,
+                    stroke,
+                    stroke_width,
+                    effects,
+                    freeform,
+                    spin,
+                    extra,
+                    ..
+                } => {
                     format!("{rect:?}{kind:?}{fill:?}{stroke:?}{stroke_width}{effects:?}{spin:?}{extra:?}").hash(&mut h);
-                    freeform.as_ref().map(|f| Arc::as_ptr(f) as usize).hash(&mut h);
+                    freeform
+                        .as_ref()
+                        .map(|f| Arc::as_ptr(f) as usize)
+                        .hash(&mut h);
                 }
-                Placed::Graphic { rect, graphic, spin, .. } => {
-                    (Arc::as_ptr(graphic) as usize, rect.x.to_bits(), rect.y.to_bits(), rect.w.to_bits(), rect.h.to_bits()).hash(&mut h);
+                Placed::Graphic {
+                    rect,
+                    graphic,
+                    spin,
+                    ..
+                } => {
+                    (
+                        Arc::as_ptr(graphic) as usize,
+                        rect.x.to_bits(),
+                        rect.y.to_bits(),
+                        rect.w.to_bits(),
+                        rect.h.to_bits(),
+                    )
+                        .hash(&mut h);
                     format!("{spin:?}").hash(&mut h)
                 }
-                Placed::Clip { rect, spin, items } => format!("{rect:?}{spin:?}{items:?}").hash(&mut h),
+                Placed::Clip { rect, spin, items } => {
+                    format!("{rect:?}{spin:?}{items:?}").hash(&mut h)
+                }
                 Placed::Cell { .. } | Placed::Object { .. } => {}
             }
         }
@@ -425,7 +583,11 @@ pub fn engine_type(state: State<EngineState>, doc: u32, text: String) -> Result<
 /// Run the command bound to a key such as `Mod+B`, `Shift+Left` or `Backspace`, as
 /// WordCraft's own window does. Returns `None` when no command is bound to the key.
 #[tauri::command(async)]
-pub fn engine_key(state: State<EngineState>, doc: u32, key: String) -> Result<Option<DocState>, String> {
+pub fn engine_key(
+    state: State<EngineState>,
+    doc: u32,
+    key: String,
+) -> Result<Option<DocState>, String> {
     with_doc(&state, doc, |s| {
         let reg = s.registry.clone();
         if let Some(spec) = s.keymap.resolve(&reg, &key) {
@@ -434,7 +596,8 @@ pub fn engine_key(state: State<EngineState>, doc: u32, key: String) -> Result<Op
         }
         // Shift extends caret movement when nothing is bound to the shifted key.
         if let Some(plain) = key.strip_prefix("Shift+").map(str::to_string).or_else(|| {
-            key.contains("+Shift+").then(|| key.replacen("+Shift+", "+", 1))
+            key.contains("+Shift+")
+                .then(|| key.replacen("+Shift+", "+", 1))
         }) && let Some(spec) = s.keymap.resolve(&reg, &plain)
         {
             let params = if spec.id.starts_with("caret.") {
@@ -475,15 +638,32 @@ pub fn engine_click(
             // A click on a picture or shape selects it.
             let story = s.sel.focus.story;
             let layout = s.layout();
-            if let Some(hit) = layout.object_at_in(page, x, y, 3.0, story).filter(|h| h.text_box.is_none()) {
+            if let Some(hit) = layout
+                .object_at_in(page, x, y, 3.0, story)
+                .filter(|h| h.text_box.is_none())
+            {
                 let a = hit.pos();
-                let b = Pos { off: a.off + wordcraft_engine::doc::para::OBJ.len_utf8(), ..a.clone() };
+                let b = Pos {
+                    off: a.off + wordcraft_engine::doc::para::OBJ.len_utf8(),
+                    ..a.clone()
+                };
                 s.page_hint = page;
                 run(s, "select.range", json!({ "anchor": a, "focus": b }))?;
                 return Ok(doc_state(doc, s));
             }
+            // Like Word, one click moves between the body, footnotes and text boxes (headers and
+            // footers need a double click). A click on blank page while in a note goes back to
+            // the body.
+            let target = match story_kind(s) {
+                "header" | "footer" => story,
+                _ => layout.story_at(page, x, y).unwrap_or(StoryRef::Body),
+            };
             // A click beside the text (in a margin) is not an error: the cursor stays put.
-            let _ = run(s, "caret.set", json!({ "page": page, "x": x, "y": y }));
+            let _ = run(
+                s,
+                "caret.set",
+                json!({ "page": page, "x": x, "y": y, "story": target }),
+            );
         }
         Ok(doc_state(doc, s))
     })
@@ -492,7 +672,13 @@ pub fn engine_click(
 /// A double click: in the header or footer area it goes in to edit it (making one if the page
 /// has none), in the body it comes back out; anywhere else it selects the word.
 #[tauri::command(async)]
-pub fn engine_double_click(state: State<EngineState>, doc: u32, page: usize, x: f32, y: f32) -> Result<DocState, String> {
+pub fn engine_double_click(
+    state: State<EngineState>,
+    doc: u32,
+    page: usize,
+    x: f32,
+    y: f32,
+) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
         let story = s.sel.focus.story;
         let layout = s.layout();
@@ -501,7 +687,11 @@ pub fn engine_double_click(state: State<EngineState>, doc: u32, page: usize, x: 
         if let Some((shown, header)) = layout.header_footer_zone(page, y)
             && (story == StoryRef::Body || (in_hf && shown != Some(story)))
         {
-            let id = if header { "insert.editHeader" } else { "insert.editFooter" };
+            let id = if header {
+                "insert.editHeader"
+            } else {
+                "insert.editFooter"
+            };
             run(s, id, json!({ "page": page }))?;
             let story = s.sel.focus.story;
             if let Some(pos) = s.layout().hit(page, x, y, story) {
@@ -532,12 +722,22 @@ pub fn engine_command(
 ) -> Result<CommandReply, String> {
     with_doc(&state, doc, |s| {
         let pasting = command.starts_with("edit.paste");
-        let before = if pasting { s.doc.body.clone() } else { Vec::new() };
-        let result = run(s, &command, params.unwrap_or_else(|| json!({})))?;
+        let before = if pasting {
+            s.doc.body.clone()
+        } else {
+            Vec::new()
+        };
+        let params = params.unwrap_or_else(|| json!({}));
+        add_missing_builtin_style(s, &command, &params);
+        equation_on_its_own_line(s, &command, &params)?;
+        let result = run(s, &command, params)?;
         if pasting {
             fit_pasted_tables(s, &before);
         }
-        Ok(CommandReply { state: doc_state(doc, s), result })
+        Ok(CommandReply {
+            state: doc_state(doc, s),
+            result,
+        })
     })
 }
 
@@ -560,7 +760,9 @@ fn fit_pasted_tables(s: &mut Session, before: &[Arc<Block>]) {
         if before.iter().any(|old| Arc::ptr_eq(old, block)) {
             continue;
         }
-        let Block::Table(table) = &**block else { continue };
+        let Block::Table(table) = &**block else {
+            continue;
+        };
         let indent = table.props.indent.unwrap_or(0.0).max(0.0);
         let total: f32 = table.grid.iter().sum::<f32>() + indent;
         // A point or two over is how Word lays out cell padding; leave those alone.
@@ -596,7 +798,11 @@ fn fit_pasted_tables(s: &mut Session, before: &[Arc<Block>]) {
 /// Save the document: to `path` when given (the format follows its extension: docx, doc,
 /// rtf, odt, pdf, html, md, txt and more), else over the file it was opened from.
 #[tauri::command(async)]
-pub fn engine_save(state: State<EngineState>, doc: u32, path: Option<String>) -> Result<DocState, String> {
+pub fn engine_save(
+    state: State<EngineState>,
+    doc: u32,
+    path: Option<String>,
+) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
         match path {
             Some(path) => run(s, "file.saveAs", json!({ "path": path }))?,
@@ -648,7 +854,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.docx"), b"x").unwrap();
         let found = files_from_args(["a.docx", "--flag", "missing.docx"], &dir);
-        assert_eq!(found, vec![dir.join("a.docx").to_string_lossy().into_owned()]);
+        assert_eq!(
+            found,
+            vec![dir.join("a.docx").to_string_lossy().into_owned()]
+        );
     }
 
     fn text(s: &Session) -> String {
@@ -694,12 +903,23 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         for ext in ["docx", "rtf", "odt"] {
             let out = dir.join(format!("out.{ext}"));
-            run(&mut s, "file.saveAs", json!({ "path": out.to_string_lossy() })).unwrap();
-            let (doc, _) = wordcraft_engine::io::open_path_in(&out, None, &Region::default()).unwrap();
+            run(
+                &mut s,
+                "file.saveAs",
+                json!({ "path": out.to_string_lossy() }),
+            )
+            .unwrap();
+            let (doc, _) =
+                wordcraft_engine::io::open_path_in(&out, None, &Region::default()).unwrap();
             assert_eq!(text(&Session::new(doc)), "Բարև Привет", "{ext} round trip");
         }
         let pdf = dir.join("out.pdf");
-        run(&mut s, "file.saveAs", json!({ "path": pdf.to_string_lossy() })).unwrap();
+        run(
+            &mut s,
+            "file.saveAs",
+            json!({ "path": pdf.to_string_lossy() }),
+        )
+        .unwrap();
         assert!(std::fs::read(&pdf).unwrap().starts_with(b"%PDF"));
     }
 
@@ -713,7 +933,9 @@ mod tests {
 
     #[test]
     fn redraws_send_only_what_changed() {
-        let header = |r: &[u8]| -> [u32; 4] { std::array::from_fn(|i| u32::from_le_bytes(r[i * 4..i * 4 + 4].try_into().unwrap())) };
+        let header = |r: &[u8]| -> [u32; 4] {
+            std::array::from_fn(|i| u32::from_le_bytes(r[i * 4..i * 4 + 4].try_into().unwrap()))
+        };
         let mut docs = Documents::default();
         let body = "First paragraph.\n".repeat(80) + "Last line";
         docs.sessions.insert(1, session_for("d.txt", &body));
@@ -735,8 +957,14 @@ mod tests {
         run(s, "text.insert", json!({ "text": "Typed " })).unwrap();
         let r = paint(&mut docs, 1, 0, 1.0, true).unwrap();
         let [_, h, first, count] = header(&r);
-        assert!(count > 0 && count < h / 4, "a band of the page, not all of it: rows {first}+{count} of {h}");
-        assert_eq!(header(&paint(&mut docs, 1, pages - 1, 1.0, true).unwrap())[3], 0);
+        assert!(
+            count > 0 && count < h / 4,
+            "a band of the page, not all of it: rows {first}+{count} of {h}"
+        );
+        assert_eq!(
+            header(&paint(&mut docs, 1, pages - 1, 1.0, true).unwrap())[3],
+            0
+        );
         // Without what was drawn before (a new zoom), the whole page again.
         let r = paint(&mut docs, 1, 0, 1.0, false).unwrap();
         assert_eq!(header(&r)[3], header(&r)[1]);
@@ -748,7 +976,12 @@ mod tests {
         let text_width = s.doc.sections()[0].1.text_width();
         let html = "<table border=1 width=900 style='width:675pt'><tr><td width=300>a</td><td width=600>b</td></tr></table>";
         let before = s.doc.body.clone();
-        run(&mut s, "edit.paste", json!({ "html": html, "text": "a\tb" })).unwrap();
+        run(
+            &mut s,
+            "edit.paste",
+            json!({ "html": html, "text": "a\tb" }),
+        )
+        .unwrap();
         fit_pasted_tables(&mut s, &before);
         let table = s
             .doc
@@ -760,7 +993,10 @@ mod tests {
             })
             .expect("the paste added a table");
         let total: f32 = table.grid.iter().sum();
-        assert!(total <= text_width + 2.0, "table {total}pt, text {text_width}pt");
+        assert!(
+            total <= text_width + 2.0,
+            "table {total}pt, text {text_width}pt"
+        );
     }
 
     #[test]
@@ -775,18 +1011,31 @@ mod tests {
                 .body
                 .iter()
                 .find_map(|b| match &**b {
-                    Block::Table(t) => Some(t.rows.iter().map(|r| (r.props.height, r.props.height_rule, r.props.cant_split)).collect::<Vec<_>>()),
+                    Block::Table(t) => Some(
+                        t.rows
+                            .iter()
+                            .map(|r| (r.props.height, r.props.height_rule, r.props.cant_split))
+                            .collect::<Vec<_>>(),
+                    ),
                     _ => None,
                 })
                 .expect("a table")
         };
-        let expected = vec![(Some(72.0), HeightRule::AtLeast, true), (Some(20.0), HeightRule::Exact, false)];
+        let expected = vec![
+            (Some(72.0), HeightRule::AtLeast, true),
+            (Some(20.0), HeightRule::Exact, false),
+        ];
         let mut s = session_for("rows.rtf", rtf);
         assert_eq!(rows(&s), expected);
         let dir = std::env::temp_dir().join(format!("lithora-test-{}-rows", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("rows.rtf");
-        run(&mut s, "file.saveAs", json!({ "path": out.to_string_lossy() })).unwrap();
+        run(
+            &mut s,
+            "file.saveAs",
+            json!({ "path": out.to_string_lossy() }),
+        )
+        .unwrap();
         let (doc, _) = wordcraft_engine::io::open_path_in(&out, None, &Region::default()).unwrap();
         assert_eq!(rows(&Session::new(doc)), expected, "RTF round trip");
         let _ = std::fs::remove_dir_all(&dir);
@@ -799,7 +1048,8 @@ mod tests {
     fn typing_timing() {
         let para = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Հայերեն տեքստ և русский текст здесь.\n";
         let mut docs = Documents::default();
-        docs.sessions.insert(1, session_for("long.txt", &para.repeat(300)));
+        docs.sessions
+            .insert(1, session_for("long.txt", &para.repeat(300)));
         let s = docs.sessions.get_mut(&1).unwrap();
         println!("pages: {}", s.layout().pages.len());
         run(s, "caret.docEnd", json!({})).unwrap();
@@ -816,7 +1066,11 @@ mod tests {
             let t2 = t.elapsed();
             let other = paint(&mut docs, 1, page - 1, 2.0, true).unwrap().len();
             let t3 = t.elapsed();
-            println!("key {round}: edit+state {t1:?}, its page {:?} ({sent} bytes), page above {:?} ({other} bytes)", t2 - t1, t3 - t2);
+            println!(
+                "key {round}: edit+state {t1:?}, its page {:?} ({sent} bytes), page above {:?} ({other} bytes)",
+                t2 - t1,
+                t3 - t2
+            );
         }
     }
 
@@ -835,7 +1089,12 @@ mod tests {
             fit_pasted_tables(&mut s, &before);
             s
         } else {
-            let (doc, _) = wordcraft_engine::io::open_path_in(std::path::Path::new(&file), None, &system_region()).unwrap();
+            let (doc, _) = wordcraft_engine::io::open_path_in(
+                std::path::Path::new(&file),
+                None,
+                &system_region(),
+            )
+            .unwrap();
             Session::new(doc)
         };
         let layout = s.layout();
@@ -857,13 +1116,26 @@ mod tests {
 
 #[cfg(test)]
 mod spelling_tests {
-    use wordcraft_engine::proof::{ProofLang, by_script, is_correct_in, set_dictionaries_folder, suggest_in};
+    use wordcraft_engine::proof::{
+        ProofLang, by_script, is_correct_in, set_dictionaries_folder, suggest_in,
+    };
 
     #[test]
     fn russian_and_armenian_spelling_use_the_bundled_dictionaries() {
-        set_dictionaries_folder(Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dictionaries")));
+        set_dictionaries_folder(Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dictionaries"),
+        ));
         assert!(wordcraft_engine::proof::hy::has_dictionary());
-        for w in ["աշխարհ", "Բարև", "Ի՞նչ", "անում", "տունը", "Հայերեն", "տեքստ", "հայերեն"] {
+        for w in [
+            "աշխարհ",
+            "Բարև",
+            "Ի՞նչ",
+            "անում",
+            "տունը",
+            "Հայերեն",
+            "տեքստ",
+            "հայերեն",
+        ] {
             assert!(is_correct_in(w, ProofLang::Hy), "{w}");
         }
         assert!(!is_correct_in("աշխարհհ", ProofLang::Hy));

@@ -1,6 +1,7 @@
 // Interface text for the desktop editor in English, Russian and Armenian.
 import type { Language } from '../types/document';
 import { moreStrings, type MoreStrings } from './stringsMore';
+import { wordStrings, type WordStrings } from './stringsWord';
 
 const en = {
   open: 'Open',
@@ -106,7 +107,7 @@ const en = {
 };
 
 type BaseStrings = typeof en;
-type Strings = BaseStrings & MoreStrings;
+type Strings = BaseStrings & MoreStrings & WordStrings;
 
 const ru: BaseStrings = {
   open: 'Открыть',
@@ -315,8 +316,8 @@ const hy: BaseStrings = {
 };
 
 export const strings: Record<Language, Strings> = {
-  en: { ...en, ...moreStrings.en },
-  ru: { ...ru, ...moreStrings.ru },
-  hy: { ...hy, ...moreStrings.hy },
+  en: { ...en, ...moreStrings.en, ...wordStrings.en },
+  ru: { ...ru, ...moreStrings.ru, ...wordStrings.ru },
+  hy: { ...hy, ...moreStrings.hy, ...wordStrings.hy },
 };
 export type { Strings };

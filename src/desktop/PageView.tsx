@@ -65,6 +65,10 @@ export interface PageViewHandle {
   copy(): Promise<void>;
   cut(): Promise<void>;
   focus(): void;
+  /** The size of the area the pages are shown in, in CSS pixels. */
+  viewport(): { width: number; height: number };
+  /** Put pictures (files) on the page at a point in the window, as dropped there. */
+  dropPictures(paths: string[], clientX: number, clientY: number): Promise<void>;
 }
 
 interface PageViewProps {
@@ -78,6 +82,21 @@ interface PageViewProps {
   onCurrentPage(page: number): void;
   /** A right click on a page, at a point in the window. */
   onContextMenu(x: number, y: number): void;
+  /** Read mode: the keyboard moves around and copies, but doesn't change the document. */
+  readOnly?: boolean;
+}
+
+/** Keys that change nothing, allowed in Read mode. */
+const READ_KEYS = /^(Shift\+)?(Left|Right|Up|Down|Home|End|PageUp|PageDown)$|^Mod\+(Shift\+)?(Left|Right|Up|Down|Home|End|A)$/;
+
+/** A file's bytes as base64. */
+function fileBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 /** Which corner of a picture's frame is being dragged. */
@@ -92,7 +111,7 @@ interface ObjectDrag {
 }
 
 export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageView(
-  { doc, zoom, onState, onError, onShortcut, onCurrentPage, onContextMenu },
+  { doc, zoom, onState, onError, onShortcut, onCurrentPage, onContextMenu, readOnly },
   ref,
 ) {
   const id = doc.id;
@@ -367,7 +386,41 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     await run(action);
   }, [run]);
 
-  useImperativeHandle(ref, () => ({ command, commands, edit, copy, cut, focus }), [command, commands, edit, copy, cut, focus]);
+  const viewport = useCallback(() => {
+    const el = scroller.current;
+    return { width: el?.clientWidth ?? window.innerWidth, height: el?.clientHeight ?? window.innerHeight };
+  }, []);
+
+  const dropPictures = useCallback(
+    async (paths: string[], clientX: number, clientY: number) => {
+      const target = document.elementFromPoint(clientX, clientY)?.closest('[data-page]') as HTMLElement | null;
+      if (target) {
+        const box = target.getBoundingClientRect();
+        const page = Number(target.dataset.page);
+        const x = (clientX - box.left) / pxPerPt;
+        const y = (clientY - box.top) / pxPerPt;
+        await run(() => engine.click(id, page, x, y, false), false);
+      }
+      await run(async () => {
+        let last: DocState | null = null;
+        for (const path of paths) last = (await engine.command(id, 'insert.picture', { path })).state;
+        return last;
+      });
+      focus();
+    },
+    [focus, id, pxPerPt, run],
+  );
+
+  useImperativeHandle(ref, () => ({ command, commands, edit, copy, cut, focus, viewport, dropPictures }), [
+    command,
+    commands,
+    edit,
+    copy,
+    cut,
+    focus,
+    viewport,
+    dropPictures,
+  ]);
 
   // Start typing straight away in a newly shown document.
   useEffect(() => {
@@ -399,6 +452,10 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
       e.preventDefault();
       return;
     }
+    if (readOnly && !READ_KEYS.test(combo) && combo !== 'Mod+C' && combo !== 'Mod+Insert') {
+      e.preventDefault();
+      return;
+    }
     if (combo === 'Mod+C' || combo === 'Mod+Insert') {
       e.preventDefault();
       void copy();
@@ -422,12 +479,20 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     const box = e.currentTarget;
     const text = box.value;
     box.value = '';
+    if (readOnly) return;
     typeText(text);
   };
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
+    if (readOnly) return;
     const data = e.clipboardData;
+    // A copied picture (a screenshot, an image from a web page) goes in as a picture.
+    const picture = [...data.items].find((item) => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile();
+    if (picture && !data.getData('text/plain')) {
+      run(async () => (await engine.command(id, 'insert.picture', { data: await fileBase64(picture) })).state);
+      return;
+    }
     const params: Record<string, string> = {};
     const text = data.getData('text/plain');
     const html = data.getData('text/html');
@@ -486,10 +551,15 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   };
 
   useEffect(() => {
-    const stop = () => (dragging.current = false);
+    const stop = () => {
+      const was = dragging.current;
+      dragging.current = false;
+      // Format Painter: the formatting goes onto what was just selected (or the word clicked).
+      if (was && latest.current.painter) run(async () => (await engine.command(id, 'edit.pasteFormat')).state, false);
+    };
     window.addEventListener('mouseup', stop);
     return () => window.removeEventListener('mouseup', stop);
-  }, []);
+  }, [id, run]);
 
   const cursor = doc.cursor;
 
@@ -651,7 +721,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
           onCompositionEnd={(e) => {
             composing.current = false;
             e.currentTarget.value = '';
-            typeText(e.data);
+            if (!readOnly) typeText(e.data);
           }}
         />
       </div>
