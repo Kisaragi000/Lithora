@@ -5,103 +5,141 @@
 <h1 align="center">Lithora</h1>
 
 <p align="center">
-  A free, open source word processor for the desktop, built for multilingual documents.<br>
-  Open, edit and save Word (.docx) and RTF files in English, Russian, Armenian and more.
+  <strong>A free and open source word processor for Windows and Linux.</strong><br>
+  Open, edit and save Word and RTF documents, with English, Russian and Armenian built in.
 </p>
 
-> **Status: early development.** Lithora is not ready for everyday work yet. Expect missing
-> features and rough edges.
+<p align="center">
+  <a href="https://github.com/Kisaragi000/Lithora/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Kisaragi000/Lithora?color=376FA3&label=download"></a>
+  <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-6C9FCB">
+  <a href="#license"><img alt="License: MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%7C%20Apache--2.0-083B69"></a>
+</p>
 
-## Install
+<p align="center">
+  <img src="docs/screenshots/editor.png" alt="Lithora editing a document with English, Russian and Armenian text" width="860">
+</p>
 
-Download the installer from the [Releases](https://github.com/Kisaragi000/Lithora/releases) page:
+Lithora is free to download, free to use and free to share. There are no accounts, no
+subscriptions, no ads and no cloud: your documents stay on your computer. The full source code
+is here on GitHub under the MIT and Apache-2.0 licenses.
 
-- **Windows 10/11:** `Lithora_<version>_x64-setup.exe`. It installs for your user only, so it
-  does not need administrator rights. Windows SmartScreen may warn that the publisher is
-  unknown, because the installer is not code-signed yet; choose *More info*, then *Run anyway*.
-- **Linux:** the `.deb` (Ubuntu, Debian, Mint), the `.rpm` (Fedora, openSUSE) or the
-  `.AppImage` (any distribution; make it executable and run it).
+> Lithora is young. It handles everyday documents well, but complex Word layouts may not look
+> exactly the same yet. If a document comes out wrong, please
+> [open an issue](https://github.com/Kisaragi000/Lithora/issues).
 
-Lithora is self-contained: nothing else needs to be installed. In the app, press
-**Ctrl+Shift+E** to switch to the new document view, where Lithora's own engine lays out and
-edits the pages.
+## Download
 
-## Features today
+Get the latest version from the **[Releases page](https://github.com/Kisaragi000/Lithora/releases/latest)**.
 
-- Opens .docx, .rtf, .doc (Word 97-2003), .odt and Word XML files.
-- Saves .docx and .rtf. RTF output escapes Unicode correctly, so Armenian and Cyrillic text
-  survives the round trip.
-- Word-style ribbon, multiple documents in tabs, find and replace, outline, ruler.
-- Interface in English, Russian (Русский) and Armenian (Հայերեն).
+| System | File |
+|---|---|
+| Windows 10 and 11 | `Lithora_<version>_x64-setup.exe` |
+| Ubuntu, Debian, Mint | `Lithora_<version>_amd64.deb` |
+| Fedora, openSUSE | `Lithora-<version>-1.x86_64.rpm` |
+| Any Linux | `Lithora_<version>_amd64.AppImage` (make it executable, then run it) |
+
+Lithora installs on its own: you don't need Microsoft Office, LibreOffice or anything else.
+The Windows installer doesn't need administrator rights. Because the installer is not
+code-signed yet, Windows SmartScreen may say the publisher is unknown; choose
+**More info**, then **Run anyway**.
+
+Lithora updates itself: click **Check for updates** in the title bar, and the new version
+installs and restarts the app.
+
+## Features
+
+**Documents**
+- Opens Word files (.docx, .docm, .dotx, .doc), RTF, OpenDocument (.odt), HTML, Markdown and
+  plain text.
+- Saves Word (.docx and .doc), RTF, OpenDocument, HTML, Markdown and text, and exports PDF.
+- Keeps page layout, tables, columns, headers and footers as close to Word as it can.
+- Armenian and Cyrillic text survives the trip through RTF and Word unchanged.
+
+**Writing**
+- A Word-style ribbon, with Table and Header & Footer tabs that appear when you need them.
+- Several documents open at once, in tabs.
+- Find and replace, change case (Shift+F3), comments and tracked changes.
 - Spell check as you type in English, Russian and Armenian, with suggestions on right-click.
-- Printing to any installed printer, with copies, page ranges and two-sided printing.
-- Tables, headers and footers, page numbers, comments and tracked changes.
-- Drawn signatures: sign with the mouse, a pen or a finger, save the signature and place it
-  anywhere in a document.
-- A History panel (like Photoshop's): click any earlier step to go back to it.
-- AutoRecover: documents that weren't saved come back after a crash, plus a Recent files list.
-- Missing-font detection with Google Fonts substitutes.
+- Proofread panel with grammar and style checks for English, and basic checks for Russian and
+  Armenian. Everything runs offline.
 
-## Roadmap
+**Signing and printing**
+- Draw your signature with a mouse, pen or finger, save it, and place it anywhere in a
+  document.
+- Print to any installed printer, with copies, page ranges and two-sided printing.
 
-Lithora keeps its React interface and runs as a native desktop app with
-[Tauri](https://tauri.app). Its document engine is built on the Rust crates of
-[WordCraft](https://github.com/storytold/wordcraft) (MIT OR Apache-2.0), which read and write
-.docx, .rtf and .odt, lay out pages and export PDF. Lithora adds its own interface and
-Armenian and Russian support on top. Code from [LibreOffice](https://www.libreoffice.org)
-(MPL-2.0) may be borrowed file by file where it helps fidelity.
+**Peace of mind**
+- A History panel, like Photoshop's: click any earlier step to go back to it.
+- AutoRecover keeps a copy of unsaved work and brings it back after a crash.
+- A Recent files list, and the window remembers its size and place.
 
-## Getting started
+**Languages**
+- The interface is available in English, Russian (Русский) and Armenian (Հայերեն).
 
-You need [Node.js](https://nodejs.org) 20 or newer. For the desktop app you also need
-[Rust](https://rustup.rs) and the
-[Tauri system prerequisites](https://tauri.app/start/prerequisites/) for your platform.
+<p align="center">
+  <img src="docs/screenshots/table.png" alt="A Word document with a table, with the Lithora interface in Russian" width="860">
+</p>
+
+## Build from source
+
+You need [Node.js](https://nodejs.org) 20 or newer, [Rust](https://rustup.rs), and the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system.
 
 ```sh
 git clone https://github.com/Kisaragi000/Lithora.git
 cd Lithora
 npm install
 
-npm run tauri dev     # run the desktop app
-npm run tauri build   # build installers for your platform (output in src-tauri/target/release/bundle)
-
-npm run dev           # or run in a browser at http://localhost:3000
-npm run lint          # typecheck
+npm run tauri dev     # run Lithora from source
+npm run tauri build   # build installers (in src-tauri/target/release/bundle)
+npm run lint          # type check
 ```
 
-To build a Windows installer from Linux, install `nsis` and `mingw-w64`, add the Rust target
-with `rustup target add x86_64-pc-windows-gnu`, then run
+To build the Windows installer on Linux, install `nsis` and `mingw-w64`, run
+`rustup target add x86_64-pc-windows-gnu`, then
 `npm run tauri build -- --target x86_64-pc-windows-gnu --bundles nsis`.
 
-To release a new version, raise the version number (package.json, package-lock.json,
-src-tauri/tauri.conf.json, src-tauri/Cargo.toml) and merge to `main`. The Release workflow in
-GitHub Actions then builds the Windows and Linux installers and publishes them as a GitHub
-release, and the app's "Check for updates" button offers it. Merges that keep the version
-number of an already published release don't build anything.
+### How it is built
 
-## Project layout
+Lithora is a [Tauri](https://tauri.app) app: the interface is React and TypeScript, and the
+document engine is Rust. The engine is based on the open source crates of
+[WordCraft](https://github.com/storytold/wordcraft), which read and write the file formats,
+lay out pages and export PDF. Lithora adds its own interface, Armenian and Russian support,
+signatures, printing and more on top.
 
 | Path | What it holds |
 |---|---|
-| `src/` | The React app: components, file format services, translations |
-| `src/services/` | Parsers and writers for .docx, .rtf, .doc, .odt and Word XML |
-| `src/i18n/` | Interface translations |
-| `src-tauri/` | The Tauri desktop shell (Rust) |
-| `src-tauri/src/engine/` | The document engine bridge: open, draw, edit and save pages |
+| `src/desktop/` | The interface: ribbon, page view, dialogs, panels, translations |
+| `src-tauri/src/` | The desktop shell: engine bridge, printing, proofreading, signatures, updates |
+| `src-tauri/vendor/` | Lithora's patched copies of two WordCraft crates |
+| `src-tauri/dictionaries/` | Russian and Armenian spelling dictionaries |
 | `third-party/` | Licenses and notices of bundled third-party code and fonts |
-| `public/` | Logo and static assets |
+
+### Releases
+
+Raise the version number in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml` and
+`src-tauri/tauri.conf.json`, then merge to `main`. GitHub Actions builds the Windows and Linux
+installers and publishes the release, and the app's update button picks it up. Merges that
+keep the version number don't publish anything.
+
+## Contributing
+
+Bug reports, document samples that don't open correctly, translations and pull requests are
+all welcome. Please open an [issue](https://github.com/Kisaragi000/Lithora/issues) to start.
 
 ## License
 
-Lithora is licensed under either of
+Lithora is free and open source software, licensed under either of
 
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 
-at your option.
+at your option. Unless you say otherwise, any contribution you submit for inclusion in
+Lithora is dual licensed in the same way, without any additional terms or conditions.
 
-Unless you explicitly state otherwise, any contribution you submit for inclusion in Lithora
-shall be dual licensed as above, without any additional terms or conditions.
+## Credits
 
-Lithora includes third-party code and fonts under their own licenses; see
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Lithora's document engine is built on [WordCraft](https://github.com/storytold/wordcraft)
+(MIT OR Apache-2.0), and printing on its craft-print crate. English grammar checking uses [Harper](https://github.com/Automattic/harper)
+(Apache-2.0). The Russian and Armenian dictionaries, the fonts and the other bundled code
+are listed with their licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
