@@ -1,6 +1,6 @@
 /**
- * The Settings menu in the title bar. For now it holds AutoSave: how often Lithora keeps a
- * recovery copy of unsaved changes.
+ * The Settings menu in the title bar: AutoSave (how often Lithora keeps a recovery copy of
+ * unsaved changes) and whether Lithora looks for updates when it starts.
  */
 import React, { useRef, useState } from 'react';
 import { Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
@@ -37,13 +37,40 @@ export function storeAutosave(seconds: number) {
   }
 }
 
+const UPDATE_CHECK_KEY = 'lithora_update_check';
+
+/** Whether Lithora looks for a new version when it starts (on unless turned off). */
+export function storedUpdateCheck(): boolean {
+  try {
+    return localStorage.getItem(UPDATE_CHECK_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+export function storeUpdateCheck(on: boolean) {
+  try {
+    localStorage.setItem(UPDATE_CHECK_KEY, on ? 'on' : 'off');
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 /** "Every 5 minutes", for the chosen interval. */
 export function autosaveLabel(t: Strings, seconds: number): string {
   const option = AUTOSAVE_OPTIONS.find(([s]) => s === seconds) ?? AUTOSAVE_OPTIONS[2];
   return t[option[1]];
 }
 
-export function SettingsMenu({ t, autosave, onAutosave }: { t: Strings; autosave: number; onAutosave(seconds: number): void }) {
+interface MenuProps {
+  t: Strings;
+  autosave: number;
+  onAutosave(seconds: number): void;
+  updateCheck: boolean;
+  onUpdateCheck(on: boolean): void;
+}
+
+export function SettingsMenu({ t, autosave, onAutosave, updateCheck, onUpdateCheck }: MenuProps) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const close = React.useCallback(() => setOpen(false), []);
@@ -87,6 +114,17 @@ export function SettingsMenu({ t, autosave, onAutosave }: { t: Strings; autosave
                 );
               })}
             </div>
+            <p className="mt-3 border-t border-slate-200 px-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-[#376FA3]">{t.updates}</p>
+            <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-[13px] text-slate-700 hover:bg-slate-100">
+              <input
+                type="checkbox"
+                checked={updateCheck}
+                onChange={(e) => onUpdateCheck(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#376FA3]"
+              />
+              <span>{t.autoUpdateCheck}</span>
+            </label>
+            <p className="px-1 text-[12px] leading-snug text-slate-500">{t.autoUpdateHint}</p>
           </div>
         </FloatingPanel>
       )}

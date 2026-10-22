@@ -7,6 +7,7 @@ import React, { useCallback, useDeferredValue, useEffect, useRef, useState } fro
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import { CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
@@ -22,7 +23,7 @@ import { LinkDialog, PrintDialog, RecoveryDialog, SymbolDialog, TextDialog, Word
 import { FindBar } from './FindBar';
 import { HistoryState, PanelKind, SidePanel } from './SidePanel';
 import { OWN_TITLE_BAR, WindowControls } from './WindowControls';
-import { SettingsMenu, autosaveLabel, storeAutosave, storedAutosave } from './Settings';
+import { SettingsMenu, autosaveLabel, storeAutosave, storeUpdateCheck, storedAutosave, storedUpdateCheck } from './Settings';
 import { SignatureDialog } from './SignatureDialog';
 
 const LANGUAGE_KEY = 'lithora_ui_language';
@@ -96,6 +97,12 @@ export const DesktopApp: React.FC = () => {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   /** AutoSave: seconds between recovery copies of unsaved changes. */
   const [autosave, setAutosave] = useState(storedAutosave);
+  /** Whether Lithora looks for a new version when it starts. */
+  const [updateCheck, setUpdateCheckState] = useState(storedUpdateCheck);
+  const setUpdateCheck = useCallback((on: boolean) => {
+    setUpdateCheckState(on);
+    storeUpdateCheck(on);
+  }, []);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   /** The status bar's word count: the document's, and the selection's when there is one. */
   const [words, setWords] = useState<{ total: number; selected: number | null } | null>(null);
@@ -205,6 +212,13 @@ export const DesktopApp: React.FC = () => {
     async (doc: DocState) => {
       const target = await saveDialog({ defaultPath: doc.path ?? doc.name, filters: SAVE_FILTERS });
       if (!target) return false;
+      // Plain text keeps only the words: say so first, as Word does.
+      const wasText = /\.txt$/i.test(doc.path ?? '');
+      if (/\.txt$/i.test(target) && !wasText) {
+        const t = strings[lang];
+        const sure = await ask(t.lossyFormat.replace('{format}', '.txt'), { title: 'Lithora', kind: 'warning', okLabel: t.saveAnyway, cancelLabel: t.cancel });
+        if (!sure) return false;
+      }
       try {
         updateDoc(await engine.save(doc.id, target));
         setNotice({ text: `${strings[lang].savedAs} ${baseName(target)}` });
@@ -294,6 +308,14 @@ export const DesktopApp: React.FC = () => {
   // Files dropped onto the window open in new tabs.
   useEffect(() => listenForFileDrops({ onHover: setDragging, onDrop: (paths) => void openPaths(paths) }), [openPaths]);
 
+  // Files opened from the file manager while Lithora is already running come here, in new tabs.
+  useEffect(() => {
+    const off = listen<string[]>('open-files', (e) => void openPaths(e.payload));
+    return () => {
+      void off.then((f) => f());
+    };
+  }, [openPaths]);
+
   // Ask before closing the window with unsaved documents.
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -363,19 +385,30 @@ export const DesktopApp: React.FC = () => {
         case 'Mod+Alt+M':
           if (doc) setDialog({ kind: 'comment' });
           return true;
-        case 'Mod+=':
-        case 'Mod+Shift+=':
-          setZoom((z) => Math.min(3, Math.round((z + 0.1) * 10) / 10));
-          return true;
-        case 'Mod+-':
-          setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10));
-          return true;
         default:
           return false;
       }
     },
     [activeId, closeDoc, newDocument, openFiles, save, saveAs],
   );
+
+  // Ctrl + mouse wheel (or a touchpad pinch) zooms, in steps of 10%.
+  useEffect(() => {
+    let pending = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      // One mouse notch is one step; touchpads send many small moves, which add up to one.
+      const delta = e.deltaMode === 0 ? e.deltaY : e.deltaY * 50;
+      pending = Math.abs(delta) >= 50 ? delta : pending + delta;
+      if (Math.abs(pending) < 50) return;
+      const step = pending > 0 ? -0.1 : 0.1;
+      pending = 0;
+      setZoom((z) => Math.min(3, Math.max(0.5, Math.round((z + step) * 10) / 10)));
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, []);
 
   // The same shortcuts when the keyboard is outside the page (in the ribbon, say).
   useEffect(() => {
@@ -639,7 +672,7 @@ export const DesktopApp: React.FC = () => {
       case 'picture': {
         const picked = await openDialog({
           multiple: false,
-          filters: [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'webp', 'emf', 'wmf'] }],
+          filters: [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'emf', 'wmf'] }],
         });
         if (typeof picked === 'string') onCommand('insert.picture', { path: picked });
         return;
@@ -716,7 +749,7 @@ export const DesktopApp: React.FC = () => {
           >
             <History className="h-4 w-4 text-[#376FA3]" /> {t.history}
           </button>
-          <SettingsMenu t={t} autosave={autosave} onAutosave={setAutosave} />
+          <SettingsMenu t={t} autosave={autosave} onAutosave={setAutosave} updateCheck={updateCheck} onUpdateCheck={setUpdateCheck} />
           <button
             type="button"
             disabled={!active}
@@ -746,7 +779,7 @@ export const DesktopApp: React.FC = () => {
             <Save className="h-4 w-4" /> {t.save}
           </button>
           <span className="mx-1 h-5 w-px bg-slate-200" />
-          <UpdateButton t={t} unsavedNames={unsavedNames} notify={notify} />
+          <UpdateButton t={t} unsavedNames={unsavedNames} notify={notify} autoCheck={updateCheck} />
           <span className="mx-1 h-5 w-px bg-slate-200" />
           <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
             <Globe className="ml-1.5 mr-0.5 h-3.5 w-3.5 text-slate-500" />

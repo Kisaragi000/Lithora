@@ -254,6 +254,13 @@ impl NumDict {
             v.remove(i);
             offer(s(&v), &mut out);
         }
+        // `ու` is one Armenian sound written with two letters: a doubled or missing one is one slip.
+        let mut start = 0;
+        while let Some(i) = base[start..].find("ու") {
+            let at = start + i;
+            offer(format!("{}{}", &base[..at], &base[at + "ու".len()..]), &mut out);
+            start = at + "ու".len();
+        }
         for i in 0..n {
             for &c in &self.try_chars {
                 if c.is_uppercase() || c == chars[i] {

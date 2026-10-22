@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.3.5"
+version = "0.4.0"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -26,7 +26,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 # Lithora's document engine: WordCraft's Rust crates (MIT OR Apache-2.0),
 # https://github.com/storytold/wordcraft. Pinned to a reviewed commit.
-wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "117aea31a8e61bd3e306e9210800cdc42897e3c1" }
+wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d" }
 sys-locale = "0.3"
 tauri-plugin-clipboard-manager = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip", "json"] }
@@ -36,7 +36,10 @@ semver = "1"
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8" }
 base64 = "0.22"
 sha2 = "0.10"
+# Checks the signature on update checksum lists.
+ed25519-dalek = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
 # English grammar and style checking for Proofread (Apache-2.0), https://github.com/Automattic/harper
 harper-core = "2.13"
 

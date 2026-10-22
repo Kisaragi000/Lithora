@@ -7,11 +7,24 @@ mod title_bar;
 mod updater;
 mod window_layout;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // One Lithora at a time: opening a file while Lithora runs sends it to the open window,
+        // which shows it in a new tab.
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let files = engine::files_from_args(args.into_iter().skip(1), std::path::Path::new(&cwd));
+            if !files.is_empty() {
+                let _ = app.emit("open-files", files);
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(window_layout::plugin())

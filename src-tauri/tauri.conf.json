@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lithora",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "identifier": "io.github.kisaragi000.lithora",
   "build": {
     "frontendDist": "../dist",
@@ -25,7 +25,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      },
+      "devCsp": null
     }
   },
   "bundle": {
@@ -70,6 +81,89 @@
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
       "../third-party/": "third-party/",
       "dictionaries/": "dictionaries/"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "docx"
+        ],
+        "name": "Word Document",
+        "description": "Word Document",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "docm"
+        ],
+        "name": "Word Macro-Enabled Document",
+        "description": "Word Macro-Enabled Document",
+        "mimeType": "application/vnd.ms-word.document.macroEnabled.12",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "dotx"
+        ],
+        "name": "Word Template",
+        "description": "Word Template",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "dotm"
+        ],
+        "name": "Word Macro-Enabled Template",
+        "description": "Word Macro-Enabled Template",
+        "mimeType": "application/vnd.ms-word.template.macroEnabled.12",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "doc"
+        ],
+        "name": "Word 97-2003 Document",
+        "description": "Word 97-2003 Document",
+        "mimeType": "application/msword",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "dot"
+        ],
+        "name": "Word 97-2003 Template",
+        "description": "Word 97-2003 Template",
+        "mimeType": "application/msword",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "rtf"
+        ],
+        "name": "Rich Text Document",
+        "description": "Rich Text Document",
+        "mimeType": "application/rtf",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "odt"
+        ],
+        "name": "OpenDocument Text",
+        "description": "OpenDocument Text",
+        "mimeType": "application/vnd.oasis.opendocument.text",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "ott"
+        ],
+        "name": "OpenDocument Text Template",
+        "description": "OpenDocument Text Template",
+        "mimeType": "application/vnd.oasis.opendocument.text-template",
+        "role": "Editor"
+      }
+    ]
   }
 }

@@ -1,7 +1,7 @@
 # wordcraft-formats (Lithora copy)
 
 This is WordCraft's import/export crate from https://github.com/storytold/wordcraft at commit
-117aea31a8e61bd3e306e9210800cdc42897e3c1, used in place of the upstream crate through
+00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d, used in place of the upstream crate through
 `[patch]` in `src-tauri/Cargo.toml`. It is licensed MIT OR Apache-2.0, the same as WordCraft
 (see `third-party/wordcraft/` for the license texts and copyright).
 

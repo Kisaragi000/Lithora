@@ -1,16 +1,16 @@
 # Lithora's copy of WordCraft's import/export crate (MIT OR Apache-2.0,
-# https://github.com/storytold/wordcraft, commit 117aea3), with RTF table row
+# https://github.com/storytold/wordcraft, commit 00bc6a4), with RTF table row
 # heights and keep-together rows added. See README.md in this folder.
 [package]
 name = "wordcraft-formats"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "WordCraft import/export: plain text, Markdown, HTML, RTF, OpenDocument Text and LaTeX"
 
 [dependencies]
-wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "117aea31a8e61bd3e306e9210800cdc42897e3c1" }
-wordcraft-geom = { git = "https://github.com/storytold/wordcraft", rev = "117aea31a8e61bd3e306e9210800cdc42897e3c1" }
+wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d" }
+wordcraft-geom = { git = "https://github.com/storytold/wordcraft", rev = "00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
 quick-xml = "0.41"
 zip = { version = "3", default-features = false, features = ["deflate"] }
@@ -18,6 +18,11 @@ cfb = "0.15"
 encoding_rs = "0.8"
 chardetng = "1"
 log = "0.4"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+# The browser clock (`SystemTime::now()` panics on wasm32-unknown-unknown): ODT change dates.
 js-sys = "0.3"
+
+[dev-dependencies]
+proptest = "1"
