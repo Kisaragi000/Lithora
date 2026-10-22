@@ -1,8 +1,0 @@
-{
-  "name": "Lithora - Multilingual Word & RTF Document Suite",
-  "description": "Advanced .docx and .rtf file editor and viewer with multi-tab multitasking, rich formatting ribbon, and native English, Russian, and Armenian support.",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}
