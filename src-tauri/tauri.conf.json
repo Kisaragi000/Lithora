@@ -44,7 +44,7 @@
     "publisher": "Kisaragi and the Lithora contributors",
     "homepage": "https://github.com/Kisaragi000/Lithora",
     "copyright": "Copyright (c) 2026 Kisaragi and the Lithora contributors",
-    "longDescription": "Lithora is a free, open source word processor for Word and RTF documents in English, Russian and Armenian. It lays out and edits pages with its own engine, so nothing else needs to be installed.",
+    "longDescription": "Lithora is a free, open source word processor for Word, RTF, OpenDocument, HTML, Markdown and text documents in English, Russian and Armenian. It lays out and edits pages with its own engine, so nothing else needs to be installed.",
     "linux": {
       "deb": {
         "section": "editors"
