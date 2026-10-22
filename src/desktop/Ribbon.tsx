@@ -205,6 +205,21 @@ export function FloatingPanel({
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, [anchor]);
+  // The wheel scrolls this list itself. Done by hand: in the desktop web view the wheel over a
+  // floating list went to the ribbon behind it instead.
+  useEffect(() => {
+    const el = panel.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const line = e.deltaMode === 1 ? 36 : e.deltaMode === 2 ? el.clientHeight : 1;
+      el.scrollTop += e.deltaY * line;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
   useEffect(() => {
     const away = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -223,8 +238,11 @@ export function FloatingPanel({
   return createPortal(
     <div
       ref={panel}
-      className={`fixed z-[100] overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl ${className}`}
+      className={`fixed z-[100] overflow-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-2 shadow-xl ${className}`}
       style={{ left: pos.left, top: pos.top, maxHeight: pos.maxHeight }}
+      // React passes events from a portal up to the component that opened it: keep the wheel
+      // from reaching the ribbon row's own wheel handler.
+      onWheel={(e) => e.stopPropagation()}
     >
       {children}
     </div>,
@@ -348,11 +366,12 @@ function FontPicker({
       type="button"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => pick(name)}
-      title={installed.has(name) ? name : `${name} (${t.fontSubstituted})`}
-      className={`block w-full truncate rounded px-2 py-1 text-left text-[15px] leading-6 hover:bg-[#6C9FCB]/15 ${
+      title={installed.has(name) ? undefined : `${name} (${t.fontSubstituted})`}
+      className={`block w-full cursor-pointer truncate rounded-md px-2.5 py-1.5 text-left text-[15px] leading-6 hover:bg-[#6C9FCB]/20 ${
         name === value ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-800'
       }`}
-      style={{ fontFamily: previewFamily(name) }}
+      // Long font lists: rows off screen aren't drawn until scrolled to.
+      style={{ fontFamily: previewFamily(name), contentVisibility: 'auto', containIntrinsicSize: 'auto 36px' }}
     >
       {name}
     </button>
@@ -597,6 +616,8 @@ export const Ribbon = React.memo(function Ribbon({ t, doc, fonts, recent, onOpen
         className="lithora-slim-scroll flex h-12 items-center gap-0.5 overflow-x-auto px-3"
         // On a narrow window the commands run past the edge: the mouse wheel scrolls them.
         onWheel={(e) => {
+          // Only for the row itself, not for an open list that belongs to one of its buttons.
+          if (!e.currentTarget.contains(e.target as Node)) return;
           if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) e.currentTarget.scrollLeft += e.deltaY;
         }}
       >
