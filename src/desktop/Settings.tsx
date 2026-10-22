@@ -4,7 +4,7 @@
  */
 import React, { useRef, useState } from 'react';
 import { Check, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
-import { FloatingPanel } from './Ribbon';
+import { FloatingPanel } from './ribbonParts';
 import type { Strings } from './strings';
 
 const AUTOSAVE_KEY = 'lithora_autosave_secs';

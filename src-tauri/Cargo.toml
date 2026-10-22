@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.4.1"
+version = "0.5.0"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -29,6 +29,9 @@ tauri-plugin-dialog = "2"
 wordcraft-engine = { git = "https://github.com/storytold/wordcraft", rev = "00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d" }
 sys-locale = "0.3"
 tauri-plugin-clipboard-manager = "2"
+# Paste reads formatted text and pictures from the clipboard (the plugin reads only text).
+arboard = "3.7"
+image = { version = "0.25", default-features = false, features = ["png"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip", "json"] }
 semver = "1"
 # Printing: sends a print-ready PDF to the system spooler (CUPS on Linux, the Windows print
@@ -42,6 +45,8 @@ tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 # English grammar and style checking for Proofread (Apache-2.0), https://github.com/Automattic/harper
 harper-core = "2.13"
+# The English thesaurus Harper ships (Apache-2.0), for Review › Thesaurus.
+harper-thesaurus = "2.13"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

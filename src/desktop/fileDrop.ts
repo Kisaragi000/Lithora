@@ -5,7 +5,8 @@ export const isDesktop = '__TAURI_INTERNALS__' in window;
 
 interface FileDropHandlers {
   onHover: (hovering: boolean) => void;
-  onDrop: (paths: string[]) => void;
+  /** The dropped files, and where they were dropped (CSS pixels in the window). */
+  onDrop: (paths: string[], at: { x: number; y: number }) => void;
 }
 
 /** Listens for files dropped onto the window. Returns a function that stops listening. */
@@ -23,7 +24,8 @@ export function listenForFileDrops({ onHover, onDrop }: FileDropHandlers): () =>
           onHover(false);
         } else if (drag.type === 'drop') {
           onHover(false);
-          if (drag.paths.length > 0) onDrop(drag.paths);
+          const scale = window.devicePixelRatio || 1;
+          if (drag.paths.length > 0) onDrop(drag.paths, { x: drag.position.x / scale, y: drag.position.y / scale });
         }
       })
     )

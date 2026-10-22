@@ -8,7 +8,7 @@ import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
-import { CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
+import { BookOpen, CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
@@ -25,6 +25,30 @@ import { HistoryState, PanelKind, SidePanel } from './SidePanel';
 import { OWN_TITLE_BAR, WindowControls } from './WindowControls';
 import { SettingsMenu, autosaveLabel, storeAutosave, storeUpdateCheck, storedAutosave, storedUpdateCheck } from './Settings';
 import { SignatureDialog } from './SignatureDialog';
+import type { MoreAction, Zoom } from './RibbonMore';
+import { NavPane } from './NavPane';
+import {
+  BookmarkDialog,
+  CaptionDialog,
+  Commands,
+  CrossReferenceDialog,
+  DateTimeDialog,
+  FontDialog,
+  OpenPasswordDialog,
+  PageSetupDialog,
+  ParagraphDialog,
+  PrintPreview,
+  PropertiesDialog,
+  ProtectDialog,
+  ThesaurusDialog,
+  WatermarkDialog,
+} from './WordDialogs';
+import type { ParagraphInfo } from './engine';
+
+/** Pictures dropped onto a page go into the document; other files open in tabs. */
+const PICTURE_FILE = /\.(png|jpe?g|gif|bmp|webp|emf|wmf)$/i;
+/** Files a template can be. */
+const TEMPLATE_EXTENSIONS = ['dotx', 'dotm', 'dot', 'ott', 'docx', 'doc', 'odt', 'rtf'];
 
 const LANGUAGE_KEY = 'lithora_ui_language';
 const ZOOM_KEY = 'lithora_zoom';
@@ -48,7 +72,20 @@ type Dialog =
   | { kind: 'comment' }
   | { kind: 'reply'; id: number }
   | { kind: 'signature' }
-  | { kind: 'recovery'; docs: RecoveredDoc[] };
+  | { kind: 'recovery'; docs: RecoveredDoc[] }
+  | { kind: 'font' }
+  | { kind: 'paragraph'; info: ParagraphInfo }
+  | { kind: 'pageSetup' }
+  | { kind: 'watermark' }
+  | { kind: 'caption' }
+  | { kind: 'crossReference' }
+  | { kind: 'bookmark' }
+  | { kind: 'dateTime' }
+  | { kind: 'protect' }
+  | { kind: 'openPassword'; path: string; wrong: boolean }
+  | { kind: 'properties' }
+  | { kind: 'thesaurus' }
+  | { kind: 'preview' };
 
 interface Issue {
   text: string;
@@ -107,6 +144,9 @@ export const DesktopApp: React.FC = () => {
   /** The status bar's word count: the document's, and the selection's when there is one. */
   const [words, setWords] = useState<{ total: number; selected: number | null } | null>(null);
   const [histories, setHistories] = useState<Record<number, HistoryState>>({});
+  const [navOpen, setNavOpen] = useState(false);
+  /** Read mode: the pages without the tools, and the keyboard only moves around. */
+  const [readMode, setReadMode] = useState(false);
   const view = useRef<PageViewHandle>(null);
   const untitledCount = useRef(0);
   const docsRef = useRef(docs);
@@ -193,6 +233,11 @@ export const DesktopApp: React.FC = () => {
           remember(path);
           opened += 1;
         } catch (e) {
+          if (String(e) === 'PASSWORD_REQUIRED') {
+            setDialog({ kind: 'openPassword', path, wrong: false });
+            opened += 1;
+            continue;
+          }
           showError(`${strings[lang].couldNotOpen} ${baseName(path)}: ${e}`);
           setRecent((list) => list.filter((p) => p !== path));
         }
@@ -305,8 +350,23 @@ export const DesktopApp: React.FC = () => {
     })().catch((e) => showError(String(e)));
   }, [loadFonts, newDocument, openPaths, showError]);
 
-  // Files dropped onto the window open in new tabs.
-  useEffect(() => listenForFileDrops({ onHover: setDragging, onDrop: (paths) => void openPaths(paths) }), [openPaths]);
+  // Files dropped onto the window open in new tabs; pictures dropped onto a page go in there.
+  const dropPictures = useRef<(paths: string[], at: { x: number; y: number }) => boolean>(() => false);
+  dropPictures.current = (paths, at) => {
+    if (!view.current || !docsRef.current.length || paths.length === 0 || !paths.every((p) => PICTURE_FILE.test(p))) return false;
+    void view.current.dropPictures(paths, at.x, at.y);
+    return true;
+  };
+  useEffect(
+    () =>
+      listenForFileDrops({
+        onHover: setDragging,
+        onDrop: (paths, at) => {
+          if (!dropPictures.current(paths, at)) void openPaths(paths);
+        },
+      }),
+    [openPaths],
+  );
 
   // Files opened from the file manager while Lithora is already running come here, in new tabs.
   useEffect(() => {
@@ -385,11 +445,21 @@ export const DesktopApp: React.FC = () => {
         case 'Mod+Alt+M':
           if (doc) setDialog({ kind: 'comment' });
           return true;
+        case 'Mod+D':
+          if (doc) setDialog({ kind: 'font' });
+          return true;
+        case 'Shift+F7':
+          if (doc) setDialog({ kind: 'thesaurus' });
+          return true;
+        case 'Escape':
+          if (!readMode) return false;
+          setReadMode(false);
+          return true;
         default:
           return false;
       }
     },
-    [activeId, closeDoc, newDocument, openFiles, save, saveAs],
+    [activeId, closeDoc, newDocument, openFiles, readMode, save, saveAs],
   );
 
   // Ctrl + mouse wheel (or a touchpad pinch) zooms, in steps of 10%.
@@ -503,6 +573,13 @@ export const DesktopApp: React.FC = () => {
         { label: t.deleteRow, onClick: () => onCommand('table.deleteRow') },
         { label: t.deleteColumn, onClick: () => onCommand('table.deleteColumn') },
         { label: t.mergeCells, onClick: () => onCommand('table.merge'), disabled: doc.selection.length === 0 },
+      );
+    }
+    if (!doc.object) {
+      items.push(
+        { separator: true },
+        { label: `${t.fontDialog}…`, hint: 'Ctrl+D', onClick: () => setDialog({ kind: 'font' }) },
+        { label: `${t.paragraphSettings}…`, onClick: () => void latestHandlers.current.onMore('paragraphDialog') },
       );
     }
     items.push(
@@ -639,7 +716,9 @@ export const DesktopApp: React.FC = () => {
 
   // The ribbon catches up with typing a moment later, so a keystroke only redraws the page.
   const ribbonDoc = useDeferredValue(active);
-  const latestHandlers = useRef({ openPaths, onCommand, onAction: (_: RibbonAction) => {} });
+  const latestHandlers = useRef({ openPaths, onCommand, onAction: (_: RibbonAction) => {}, onMore: (_: MoreAction) => {}, onZoom: (_: Zoom) => {} });
+  const ribbonMore = useCallback((a: MoreAction) => latestHandlers.current.onMore(a), []);
+  const ribbonZoom = useCallback((z: Zoom) => latestHandlers.current.onZoom(z), []);
   const ribbonOpenRecent = useCallback((path: string) => void latestHandlers.current.openPaths([path]), []);
   const ribbonClearRecent = useCallback(() => setRecent([]), []);
   const ribbonCommand = useCallback((name: string, params?: Record<string, unknown>) => latestHandlers.current.onCommand(name, params), []);
@@ -664,11 +743,8 @@ export const DesktopApp: React.FC = () => {
         return void view.current?.copy();
       case 'cut':
         return void view.current?.cut();
-      case 'paste': {
-        const text = await readText().catch(() => '');
-        if (text) onCommand('edit.paste', { text });
-        return;
-      }
+      case 'paste':
+        return paste('keep');
       case 'picture': {
         const picked = await openDialog({
           multiple: false,
@@ -699,7 +775,147 @@ export const DesktopApp: React.FC = () => {
         return setPanel((p) => (p === 'comments' ? null : 'comments'));
     }
   };
-  latestHandlers.current = { openPaths, onCommand, onAction: (a) => void onAction(a) };
+  /** Paste what the clipboard holds: formatted text, plain text or a picture. */
+  const paste = (mode: 'keep' | 'merge' | 'text' | 'picture') => {
+    const doc = active;
+    if (!doc) return;
+    void view.current?.edit(async () => {
+      try {
+        return (await engine.paste(doc.id, mode)).state;
+      } catch (e) {
+        // The engine can't see the clipboard (some Linux desktops): fall back to its text.
+        const text = await readText().catch(() => '');
+        if (text) return (await engine.command(doc.id, mode === 'text' ? 'edit.pasteText' : 'edit.paste', { text })).state;
+        showError(String(e) === 'the clipboard is empty' ? t.clipboardEmpty : String(e));
+        return null;
+      }
+    });
+  };
+
+  const dialogAsk = useCallback((name: string, params?: Record<string, unknown>) => ask_(name, params, true), [ask_]);
+  const applyCommands = (list: Commands) => void view.current?.commands(list);
+  const thesaurusLookup = useCallback(() => (activeId === null ? Promise.reject(new Error('no document')) : engine.thesaurus(activeId)), [activeId]);
+  const unit = lang === 'en' ? ('in' as const) : ('cm' as const);
+
+  const onZoom = (z: Zoom) => {
+    if (typeof z === 'number') return setZoom(z);
+    const page = active?.pages[Math.min(currentPage, (active?.pages.length ?? 1) - 1)];
+    const box = view.current?.viewport();
+    if (!page || !box) return;
+    const perPt = 96 / 72;
+    const width = (box.width - 56) / (page.width * perPt);
+    const fit = z === 'pageWidth' ? width : Math.min(width, (box.height - 48) / (page.height * perPt));
+    setZoom(Math.min(3, Math.max(0.5, Math.floor(fit * 100) / 100)));
+  };
+
+  const pickFile = async (title: string, extensions: string[]) => {
+    const picked = await openDialog({ title, multiple: false, filters: [{ name: 'Documents', extensions }] });
+    return typeof picked === 'string' ? picked : null;
+  };
+
+  const onMore = async (action: MoreAction) => {
+    const doc = active;
+    switch (action) {
+      case 'pasteKeep':
+        return paste('keep');
+      case 'pasteMerge':
+        return paste('merge');
+      case 'pasteText':
+        return paste('text');
+      case 'pastePicture':
+        return paste('picture');
+      case 'navPane':
+        return setNavOpen((o) => !o);
+      case 'readMode':
+        setFindBar(null);
+        return setReadMode(true);
+      case 'template': {
+        const path = await pickFile(t.newFromTemplate, TEMPLATE_EXTENSIONS);
+        if (!path) return;
+        untitledCount.current += 1;
+        try {
+          addDoc(await engine.newFromTemplate(path, `${t.untitled} ${untitledCount.current}.docx`));
+        } catch (e) {
+          showError(`${t.couldNotOpen} ${baseName(path)}: ${e}`);
+        }
+        return;
+      }
+      case 'compare': {
+        const original = await pickFile(t.compareOriginal, OPEN_EXTENSIONS);
+        if (!original) return;
+        const revised = await pickFile(t.compareRevised, OPEN_EXTENSIONS);
+        if (!revised) return;
+        try {
+          addDoc(await engine.compare(original, revised, `${t.compareResult} ${withoutExtension(baseName(revised))}.docx`));
+          setNotice({ text: t.compareDone });
+        } catch (e) {
+          showError(String(e));
+        }
+        return;
+      }
+    }
+    if (!doc) return;
+    switch (action) {
+      case 'fontDialog':
+        return setDialog({ kind: 'font' });
+      case 'paragraphDialog': {
+        const info = await engine.paragraph(doc.id).catch(() => null);
+        if (info) setDialog({ kind: 'paragraph', info });
+        return;
+      }
+      case 'pageSetup':
+        return setDialog({ kind: 'pageSetup' });
+      case 'customWatermark':
+        return setDialog({ kind: 'watermark' });
+      case 'caption':
+        return setDialog({ kind: 'caption' });
+      case 'crossReference':
+        return setDialog({ kind: 'crossReference' });
+      case 'bookmark':
+        return setDialog({ kind: 'bookmark' });
+      case 'dateTime':
+        return setDialog({ kind: 'dateTime' });
+      case 'password':
+        return setDialog({ kind: 'protect' });
+      case 'properties':
+        return setDialog({ kind: 'properties' });
+      case 'thesaurus':
+        return setDialog({ kind: 'thesaurus' });
+      case 'printPreview':
+        return setDialog({ kind: 'preview' });
+    }
+  };
+
+  const openWithPassword = async (path: string, password: string) => {
+    try {
+      const state = await engine.open(path, password);
+      setDialog(null);
+      docsRef.current = [...docsRef.current, state];
+      addDoc(state);
+      remember(path);
+    } catch (e) {
+      if (String(e) === 'WRONG_PASSWORD') setDialog({ kind: 'openPassword', path, wrong: true });
+      else {
+        setDialog(null);
+        showError(`${t.couldNotOpen} ${baseName(path)}: ${e}`);
+      }
+    }
+  };
+
+  /** The Navigation pane's heading: the cursor goes there, and the page scrolls to it. */
+  const goToHeading = (index: number) => {
+    void view.current?.command('caret.set', { pos: { story: 'body', path: [index], off: 0 } }).then(() => {
+      requestAnimationFrame(() => {
+        const caret = document.querySelector<HTMLElement>('.lithora-caret');
+        if (!caret) return;
+        // Near the top, with a little room above it so the heading isn't cut off.
+        caret.style.scrollMarginTop = '72px';
+        caret.scrollIntoView({ block: 'start' });
+      });
+    });
+  };
+
+  latestHandlers.current = { openPaths, onCommand, onAction: (a) => void onAction(a), onMore: (a) => void onMore(a), onZoom };
 
   const insertSignature = (png: string, widthPt: number) => {
     // In line with the text at the cursor, like a typed word; right-click to float it.
@@ -808,6 +1024,20 @@ export const DesktopApp: React.FC = () => {
       </header>
 
       {/* Tabs */}
+      {readMode ? (
+        <div className="flex h-9 shrink-0 items-center gap-3 border-b border-slate-200 bg-[#FBF8F0] px-4 text-[13px] select-none">
+          <BookOpen className="h-4 w-4 text-[#376FA3]" />
+          <span className="font-medium text-[#083B69]">{t.readMode}</span>
+          <span className="text-slate-500">{t.readModeHint}</span>
+          <button
+            type="button"
+            onClick={() => setReadMode(false)}
+            className="ml-auto rounded-md border border-slate-300 bg-white px-3 py-1 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {t.exitReadMode}
+          </button>
+        </div>
+      ) : (
       <div className="lithora-slim-scroll flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
         {docs.map((d) => (
           <div
@@ -851,7 +1081,9 @@ export const DesktopApp: React.FC = () => {
           <Plus className="h-4 w-4" />
         </button>
       </div>
+      )}
 
+      {!readMode && (
       <Ribbon
         t={t}
         doc={ribbonDoc}
@@ -862,9 +1094,14 @@ export const DesktopApp: React.FC = () => {
         onCommand={ribbonCommand}
         onAction={ribbonAction}
         recoveryEvery={autosaveLabel(t, autosave).toLocaleLowerCase(lang)}
+        onMore={ribbonMore}
+        zoom={zoom}
+        onZoom={ribbonZoom}
+        navOpen={navOpen}
       />
+      )}
 
-      {active && findBar && (
+      {active && findBar && !readMode && (
         <FindBar
           t={t}
           replaceMode={findBar === 'replace'}
@@ -878,6 +1115,7 @@ export const DesktopApp: React.FC = () => {
 
       {active ? (
         <div className="flex min-h-0 flex-1">
+          {navOpen && !readMode && <NavPane t={t} doc={active} onGo={goToHeading} onClose={() => setNavOpen(false)} />}
           <PageView
             key={active.id}
             ref={view}
@@ -888,8 +1126,9 @@ export const DesktopApp: React.FC = () => {
             onShortcut={shortcut}
             onCurrentPage={setCurrentPage}
             onContextMenu={(x, y) => void openContextMenu(x, y)}
+            readOnly={readMode}
           />
-          {panel && (
+          {panel && !readMode && (
             <SidePanel
               t={t}
               lang={lang}
@@ -1024,6 +1263,49 @@ export const DesktopApp: React.FC = () => {
           cancelLabel={t.cancel}
           onClose={() => setDialog(null)}
           onSubmit={(text) => onCommand('review.reply', { id: dialog.id, text })}
+        />
+      )}
+      {dialog?.kind === 'font' && active && (
+        <FontDialog t={t} format={active.format} fonts={fonts} onClose={() => setDialog(null)} onApply={applyCommands} />
+      )}
+      {dialog?.kind === 'paragraph' && <ParagraphDialog t={t} unit={unit} info={dialog.info} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'pageSetup' && <PageSetupDialog t={t} unit={unit} ask={dialogAsk} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'watermark' && <WatermarkDialog t={t} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'caption' && <CaptionDialog t={t} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'crossReference' && <CrossReferenceDialog t={t} ask={dialogAsk} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'bookmark' && <BookmarkDialog t={t} ask={dialogAsk} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'dateTime' && <DateTimeDialog t={t} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'protect' && active && (
+        <ProtectDialog
+          t={t}
+          encrypted={active.encrypted}
+          isWordFile={!active.path || /\.(docx|docm|dotx|dotm|doc)$/i.test(active.path)}
+          onClose={() => setDialog(null)}
+          onApply={(list) => {
+            applyCommands(list);
+            setNotice({ text: list[0]?.[1]?.password ? t.passwordSet : t.passwordRemoved });
+          }}
+        />
+      )}
+      {dialog?.kind === 'openPassword' && (
+        <OpenPasswordDialog
+          t={t}
+          name={baseName(dialog.path)}
+          wrong={dialog.wrong}
+          onClose={() => setDialog(null)}
+          onOpen={(pw) => void openWithPassword(dialog.path, pw)}
+        />
+      )}
+      {dialog?.kind === 'properties' && <PropertiesDialog t={t} ask={dialogAsk} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'thesaurus' && <ThesaurusDialog t={t} lookup={thesaurusLookup} onClose={() => setDialog(null)} onApply={applyCommands} />}
+      {dialog?.kind === 'preview' && active && (
+        <PrintPreview
+          t={t}
+          docId={active.id}
+          pages={active.pages}
+          startPage={currentPage}
+          onClose={() => setDialog(null)}
+          onPrint={() => setDialog({ kind: 'print' })}
         />
       )}
       {dialog?.kind === 'signature' && <SignatureDialog t={t} onClose={() => setDialog(null)} onInsert={insertSignature} onError={showError} />}

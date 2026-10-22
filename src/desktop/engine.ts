@@ -50,6 +50,35 @@ export interface DocState {
   /** The selected picture or shape's frame. */
   object: Mark | null;
   lineSpacing: number | null;
+  /** Format Painter holds formatting for the next selection. */
+  painter: boolean;
+  /** Formatting marks (¶) are shown. */
+  marks: boolean;
+  /** Saved with a password. */
+  encrypted: boolean;
+}
+
+/** A heading in the Navigation pane. */
+export interface Heading {
+  index: number;
+  level: number;
+  text: string;
+}
+
+/** The cursor paragraph's settings as they come out on the page (points). */
+export interface ParagraphInfo {
+  align: string;
+  indentLeft: number;
+  indentRight: number;
+  indentFirst: number;
+  spaceBefore: number;
+  spaceAfter: number;
+  lineSpacing: { rule: "multiple" | "atLeast" | "exactly"; value: number };
+  keepNext: boolean;
+  keepLines: boolean;
+  pageBreakBefore: boolean;
+  widowControl: boolean;
+  contextualSpacing: boolean;
 }
 
 export interface Printer {
@@ -121,7 +150,23 @@ interface CommandReply {
 }
 
 export const engine = {
-  open: (path: string) => invoke<DocState>('engine_open', { path }),
+  open: (path: string, password?: string) => invoke<DocState>('engine_open', { path, password: password ?? null }),
+  newFromTemplate: (path: string, name: string) => invoke<DocState>('engine_new_from_template', { path, name }),
+  compare: (original: string, revised: string, name: string) => invoke<DocState>('engine_compare', { original, revised, name }),
+  headings: (doc: number) => invoke<Heading[]>('engine_headings', { doc }),
+  thesaurus: (doc: number) => invoke<{ word: string; synonyms: string[]; anchor?: unknown; focus?: unknown }>('engine_thesaurus', { doc }),
+  paragraph: (doc: number) => invoke<ParagraphInfo | null>('engine_paragraph', { doc }),
+  /** Paste the clipboard: keep source formatting, merge with the text around, text only, or a picture. */
+  paste: (doc: number, mode: 'keep' | 'merge' | 'text' | 'picture') => invoke<CommandReply>('engine_paste', { doc, mode }),
+  clipboardKinds: () => invoke<{ text: boolean; picture: boolean }>('clipboard_kinds'),
+  /** Draw a whole page for Print Preview, apart from the editing view's drawings. */
+  async previewPage(doc: number, page: number, scale: number): Promise<ImageData> {
+    const buf = await invoke<ArrayBuffer>('engine_preview_page', { doc, page, scale });
+    const view = new DataView(buf);
+    const width = view.getUint32(0, true);
+    const height = view.getUint32(4, true);
+    return new ImageData(new Uint8ClampedArray(buf, 16, width * height * 4), width, height);
+  },
   create: (name: string) => invoke<DocState>('engine_new', { name }),
   close: (doc: number) => invoke<void>('engine_close', { doc }),
   state: (doc: number) => invoke<DocState>('engine_state', { doc }),
