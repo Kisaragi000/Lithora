@@ -619,22 +619,37 @@ pub fn engine_fonts(state: State<EngineState>, doc: u32) -> Result<Value, String
 /// Documents passed on the command line (`lithora report.docx`).
 #[tauri::command]
 pub fn startup_files() -> Vec<String> {
-    std::env::args_os()
-        .skip(1)
-        .map(PathBuf::from)
+    let cwd = std::env::current_dir().unwrap_or_default();
+    files_from_args(std::env::args_os().skip(1), &cwd)
+}
+
+/// The existing files named on a command line, as absolute paths (relative ones are taken
+/// from `cwd`, the folder the command was started in).
+pub fn files_from_args<I, S>(args: I, cwd: &std::path::Path) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    args.into_iter()
+        .map(|a| PathBuf::from(a.into()))
+        .map(|p| if p.is_absolute() { p } else { cwd.join(p) })
         .filter(|p| p.is_file())
-        .map(|p| {
-            std::path::absolute(&p)
-                .unwrap_or(p)
-                .to_string_lossy()
-                .into_owned()
-        })
+        .map(|p| p.to_string_lossy().into_owned())
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_line_files_become_absolute_paths() {
+        let dir = std::env::temp_dir().join(format!("lithora-args-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.docx"), b"x").unwrap();
+        let found = files_from_args(["a.docx", "--flag", "missing.docx"], &dir);
+        assert_eq!(found, vec![dir.join("a.docx").to_string_lossy().into_owned()]);
+    }
 
     fn text(s: &Session) -> String {
         let bytes = wordcraft_engine::io::save_bytes("out.txt", &s.doc).unwrap();
@@ -848,7 +863,7 @@ mod spelling_tests {
     fn russian_and_armenian_spelling_use_the_bundled_dictionaries() {
         set_dictionaries_folder(Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dictionaries")));
         assert!(wordcraft_engine::proof::hy::has_dictionary());
-        for w in ["աշխարհ", "Բարև", "Ի՞նչ", "անում", "տունը"] {
+        for w in ["աշխարհ", "Բարև", "Ի՞նչ", "անում", "տունը", "Հայերեն", "տեքստ", "հայերեն"] {
             assert!(is_correct_in(w, ProofLang::Hy), "{w}");
         }
         assert!(!is_correct_in("աշխարհհ", ProofLang::Hy));

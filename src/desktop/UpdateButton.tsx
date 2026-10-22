@@ -3,7 +3,7 @@
  * when a newer version exists the button turns into "Update to x.y.z". Updating downloads the
  * new installer, runs it and reopens Lithora.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -26,11 +26,13 @@ interface Props {
   /** Names of documents with unsaved changes. */
   unsavedNames: () => string[];
   notify: (text: string, error?: boolean) => void;
+  /** Look for a new version quietly after start (the Settings menu can turn this off). */
+  autoCheck: boolean;
 }
 
 const fill = (text: string, version: string) => text.replace('{version}', version);
 
-export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify }) => {
+export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify, autoCheck }) => {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 
   const check = useCallback(async (quiet: boolean): Promise<UpdateInfo | null> => {
@@ -51,10 +53,16 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify }) => {
   }, [notify, t]);
 
   // A quiet check shortly after start, so a new version shows without anyone asking.
+  // Only once per start: turning the setting back on doesn't check right away.
+  const autoChecked = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => void check(true), 4000);
+    if (!autoCheck || autoChecked.current) return;
+    const timer = setTimeout(() => {
+      autoChecked.current = true;
+      void check(true);
+    }, 4000);
     return () => clearTimeout(timer);
-  }, [check]);
+  }, [autoCheck, check]);
 
   useEffect(() => {
     const off = listen<{ done: number; total: number }>('update-progress', (e) => {

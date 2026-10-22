@@ -197,25 +197,53 @@ fn download(app: &AppHandle, agent: &ureq::Agent, asset: &Asset, dir: &Path) -> 
     Ok(path)
 }
 
-/// Checks the file against the release's SHA256SUMS list, when the release has one.
+/// The public half of Lithora's update signing key. Every release carries SHA256SUMS lists signed
+/// with the private half (kept as a GitHub secret), and an update is installed only when its
+/// file is in a list whose signature checks out against this key.
+const UPDATE_KEY: &str = "+1yA4bkpQx/3uvXeocO7LwYWp3aTpMpigPgll3Z0nfo=";
+
+/// Whether `signature` (base64 Ed25519) is `key`'s signature of `text`.
+fn signed_by(key: &str, text: &[u8], signature: &str) -> bool {
+    use base64::Engine;
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let Ok(key) = b64.decode(key.trim()) else { return false };
+    let Ok(sig) = b64.decode(signature.trim()) else { return false };
+    let (Ok(key), Ok(sig)) = (<[u8; 32]>::try_from(key.as_slice()), <[u8; 64]>::try_from(sig.as_slice())) else { return false };
+    let Ok(key) = VerifyingKey::from_bytes(&key) else { return false };
+    key.verify_strict(text, &Signature::from_bytes(&sig)).is_ok()
+}
+
+/// The checksum `sums` (a SHA256SUMS list) gives for the file called `name`.
+fn checksum_in(sums: &str, name: &str) -> Option<String> {
+    sums.lines().find_map(|l| {
+        let (hash, file) = l.split_once(char::is_whitespace)?;
+        (file.trim().trim_start_matches('*') == name).then(|| hash.to_ascii_lowercase())
+    })
+}
+
+fn download_text(agent: &ureq::Agent, asset: &Asset) -> Option<String> {
+    get_following_redirects(agent, &asset.browser_download_url).ok()?.body_mut().read_to_string().ok()
+}
+
+/// Checks the downloaded file against the release's signed SHA256SUMS lists. A file that no
+/// signed list vouches for is refused, so a changed or unofficial release is never installed.
 fn verify(agent: &ureq::Agent, release: &Release, file: &Path, name: &str) -> Result<(), String> {
     use sha2::{Digest, Sha256};
-    let sums = release.assets.iter().filter(|a| a.name.starts_with("SHA256SUMS"));
+    let unsigned = || "This update is not signed by Lithora, so it was not installed. Download it from the website instead.".to_string();
     let mut expected = None;
-    for s in sums {
-        let text = get_following_redirects(agent, &s.browser_download_url)
-            .ok()
-            .and_then(|mut r| r.body_mut().read_to_string().ok())
-            .unwrap_or_default();
-        expected = text.lines().find_map(|l| {
-            let (hash, file) = l.split_once(char::is_whitespace)?;
-            (file.trim().trim_start_matches('*') == name).then(|| hash.to_ascii_lowercase())
-        });
-        if expected.is_some() {
+    for sums in release.assets.iter().filter(|a| a.name.starts_with("SHA256SUMS") && a.name.ends_with(".txt")) {
+        let Some(sig) = release.assets.iter().find(|a| a.name == format!("{}.sig", sums.name)) else { continue };
+        let (Some(text), Some(sig)) = (download_text(agent, sums), download_text(agent, sig)) else { continue };
+        if !signed_by(UPDATE_KEY, text.as_bytes(), &sig) {
+            return Err(unsigned());
+        }
+        if let Some(hash) = checksum_in(&text, name) {
+            expected = Some(hash);
             break;
         }
     }
-    let Some(expected) = expected else { return Ok(()) };
+    let expected = expected.ok_or_else(unsigned)?;
     let mut hasher = Sha256::new();
     let mut f = std::fs::File::open(file).map_err(|e| e.to_string())?;
     std::io::copy(&mut f, &mut hasher).map_err(|e| e.to_string())?;
@@ -312,6 +340,20 @@ mod tests {
         assert!("Lithora_0.2.3_amd64.AppImage".ends_with(Install::AppImage(PathBuf::new()).asset_suffix().unwrap()));
         assert!("Lithora-0.2.3-1.x86_64.rpm".ends_with(Install::Rpm.asset_suffix().unwrap()));
         assert_eq!(Install::Unknown.asset_suffix(), None);
+    }
+
+    #[test]
+    fn only_lists_signed_with_the_key_are_trusted() {
+        // Made with a throwaway key: openssl pkeyutl -sign -rawin, then base64.
+        let key = "LCP6WA1mR1QG2ws/X/yNRJGT9mfpv4fPWBtnzj1adAQ=";
+        let sums = "abc123  Lithora_0.4.0_x64-setup.exe\n";
+        let sig = "yF0SegZR2svKjGEFJhdpZqtPt5gHtLuXHFuNod+w7q8DPv3YmTOaC7qvEUgJhDiTGflCbNTg+IhNlyy+SMDwDg==";
+        assert!(signed_by(key, sums.as_bytes(), sig));
+        assert!(!signed_by(key, b"def456  Lithora_0.4.0_x64-setup.exe\n", sig));
+        assert!(!signed_by(UPDATE_KEY, sums.as_bytes(), sig));
+        assert!(!signed_by(key, sums.as_bytes(), "not base64"));
+        assert_eq!(checksum_in(sums, "Lithora_0.4.0_x64-setup.exe").as_deref(), Some("abc123"));
+        assert_eq!(checksum_in(sums, "other.exe"), None);
     }
 
     /// Asks GitHub for real and downloads the smallest file of the newest release (needs the

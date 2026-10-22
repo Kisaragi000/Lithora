@@ -42,7 +42,7 @@ offline.
 
 `src-tauri/dictionaries/hy_AM.aff` and `hy_AM.dic` are the Reformed-orthography Hunspell
 dictionary of HySpell 3.0.1 (https://github.com/hyspell/HySpell_3.0.1, files `hy-r.aff` and
-`hy-r.dic`, renamed). Copyright (c) 2017 hyspell.com, author Haro Mherian. MIT License; the full
+`hy-r.dic`, renamed; Lithora added the word "տեքստ", which it lacked). Copyright (c) 2017 hyspell.com, author Haro Mherian. MIT License; the full
 notice is in [src-tauri/dictionaries/LICENSE-hy_AM.txt](src-tauri/dictionaries/LICENSE-hy_AM.txt).
 
 ## Russian spelling dictionary
@@ -51,6 +51,14 @@ notice is in [src-tauri/dictionaries/LICENSE-hy_AM.txt](src-tauri/dictionaries/L
 (https://github.com/LibreOffice/dictionaries, `ru_RU`). Copyright (c) 1997-2008 Alexander I.
 Lebedev, with changes by Laszlo Nemeth. BSD-style license; the full notice is in
 [src-tauri/dictionaries/LICENSE-ru_RU.txt](src-tauri/dictionaries/LICENSE-ru_RU.txt).
+
+## Interface fonts
+
+The menus use Plus Jakarta Sans (Copyright 2020 The Plus Jakarta Sans Project Authors), Sora
+(Copyright 2019 The Sora Project Authors) and Noto Sans Armenian (Copyright 2022 The Noto Project Authors),
+under the SIL Open Font License 1.1. They ship inside Lithora through the Fontsource npm
+packages (`@fontsource/plus-jakarta-sans`, `@fontsource/sora`, `@fontsource/noto-sans-armenian`),
+whose LICENSE files hold the full license text.
 
 ## Rust and JavaScript libraries
 

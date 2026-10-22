@@ -42,6 +42,9 @@ export function keyCombo(e: React.KeyboardEvent): string | null {
     // shortcuts work the same with a Russian or Armenian keyboard layout.
     if (/^Key[A-Z]$/.test(e.code)) name = e.code.slice(3);
     else if (/^Digit[0-9]$/.test(e.code)) name = e.code.slice(5);
+    // Ctrl+= is subscript and Ctrl+Shift+= superscript, as in Word.
+    else if (e.code === 'Equal') name = '=';
+    else if (e.code === 'Minus') name = '-';
     else if (name.length === 1) name = name.toUpperCase();
     else return null;
   }
@@ -203,8 +206,31 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
       },
       { root, rootMargin: '600px 0px' },
     );
-    root.querySelectorAll('[data-page]').forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
+    // Pages far from the screen give their bitmap back, so a long document doesn't fill the
+    // memory; they are drawn again when they come near.
+    const keeper = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) continue;
+          const page = Number((entry.target as HTMLElement).dataset.page);
+          const canvas = canvases.current[page];
+          if (!canvas || canvas.width === 0) continue;
+          canvas.width = 0;
+          canvas.height = 0;
+          drawn.current.delete(page);
+          stale.current.add(page);
+        }
+      },
+      { root, rootMargin: '3000px 0px' },
+    );
+    root.querySelectorAll('[data-page]').forEach((el) => {
+      observer.observe(el);
+      keeper.observe(el);
+    });
+    return () => {
+      observer.disconnect();
+      keeper.disconnect();
+    };
   }, [doc.pages.length, paintVisible, zoom]);
 
   // Redraw everything when the zoom changes or another document is shown.

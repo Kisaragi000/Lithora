@@ -1,9 +1,9 @@
 # Lithora's copy of WordCraft's proofing crate (MIT OR Apache-2.0,
-# https://github.com/storytold/wordcraft, commit 117aea3), with Armenian spelling and
+# https://github.com/storytold/wordcraft, commit 00bc6a4), with Armenian spelling and
 # script-based language detection added. See README.md in this folder.
 [package]
 name = "wordcraft-proof"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "WordCraft proofing per language: spelling, suggestions, grammar checks and hyphenation"
@@ -11,3 +11,6 @@ description = "WordCraft proofing per language: spelling, suggestions, grammar c
 [dependencies]
 log = "0.4"
 miniz_oxide = "0.8"
+
+[dev-dependencies]
+proptest = "1"

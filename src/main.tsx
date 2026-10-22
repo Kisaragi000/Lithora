@@ -1,6 +1,16 @@
 import {lazy, Suspense} from 'react';
 import {createRoot} from 'react-dom/client';
 import './index.css';
+// The interface fonts ship inside the app, so nothing is fetched from the internet.
+import '@fontsource/plus-jakarta-sans/400.css';
+import '@fontsource/plus-jakarta-sans/500.css';
+import '@fontsource/plus-jakarta-sans/600.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/sora/600.css';
+import '@fontsource/noto-sans-armenian/400.css';
+import '@fontsource/noto-sans-armenian/500.css';
+import '@fontsource/noto-sans-armenian/600.css';
+import '@fontsource/noto-sans-armenian/700.css';
 
 // Lithora is a desktop app: documents are opened, laid out and saved by its Rust engine,
 // which only exists inside the Tauri shell. In a plain browser, point people to the installers.
