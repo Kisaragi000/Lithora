@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/editor.png" alt="Lithora editing a document with English, Russian and Armenian text" width="860">
+  <img src="docs/screenshots/lithora-editor.png" alt="Lithora editing a document with English, Russian and Armenian text" width="860">
 </p>
 
 Lithora is free to download, free to use and free to share. There are no accounts, no
@@ -78,7 +78,7 @@ installs and restarts the app.
 - The interface is available in English, Russian (Русский) and Armenian (Հայերեն).
 
 <p align="center">
-  <img src="docs/screenshots/table.png" alt="A Word document with a table, with the Lithora interface in Russian" width="860">
+  <img src="docs/screenshots/lithora-table.png" alt="A Word document with a table, with the Lithora interface in Russian" width="860">
 </p>
 
 ## Build from source
