@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>A free and open source word processor for Windows and Linux.</strong><br>
-  Open, edit and save Word and RTF documents, with English, Russian and Armenian built in.
+  Open, edit and save Word (.docx, .doc), RTF, OpenDocument (.odt), HTML, Markdown and text files,<br>
+  export PDF, and write in English, Russian and Armenian.
 </p>
 
 <p align="center">
