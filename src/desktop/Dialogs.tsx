@@ -78,10 +78,12 @@ export function PrimaryButton({ children, onClick, disabled }: { children: React
   );
 }
 
-export function SecondaryButton({ children, onClick, disabled }: { children: React.ReactNode; onClick(): void; disabled?: boolean }) {
+export function SecondaryButton({ children, onClick, disabled, title }: { children: React.ReactNode; onClick(): void; disabled?: boolean; title?: string }) {
   return (
     <button
       type="button"
+      title={title}
+      aria-label={title}
       disabled={disabled}
       onClick={onClick}
       className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
