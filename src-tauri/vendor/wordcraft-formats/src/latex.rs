@@ -2656,7 +2656,7 @@ fn table(toks: &[Tok], spec: &str, depth: usize) -> FTable {
     if !row.is_empty() {
         rows.push(row);
     }
-    let mut out = FTable { rows: Vec::new(), widths: Vec::new(), borderless: !has_rules, row_props: Vec::new() };
+    let mut out = FTable { rows: Vec::new(), widths: Vec::new(), borderless: !has_rules, row_props: Vec::new(), indent: None };
     // Rows still covered by a `\multirow` above, per grid column.
     let mut covering: Vec<u32> = Vec::new();
     for r in rows {
@@ -3119,7 +3119,7 @@ Caf\'e na\"ive \c{c}a \v{s}\'{e} and {\bfseries grouped bold} after.
 
     #[test]
     fn exported_tables_size_their_columns() {
-        let mut t = FTable { rows: Vec::new(), widths: vec![100.0, 200.0], borderless: false, row_props: Vec::new() };
+        let mut t = FTable { rows: Vec::new(), widths: vec![100.0, 200.0], borderless: false, row_props: Vec::new(), indent: None };
         let cell = |s: &str| Cell {
             blocks: vec![FBlock::Para({
                 let mut p = Para::default();
@@ -3160,7 +3160,7 @@ Caf\'e na\"ive \c{c}a \v{s}\'{e} and {\bfseries grouped bold} after.
 
     #[test]
     fn exported_borderless_tables_omit_rules() {
-        let mut t = FTable { rows: Vec::new(), widths: vec![100.0, 200.0], borderless: true, row_props: Vec::new() };
+        let mut t = FTable { rows: Vec::new(), widths: vec![100.0, 200.0], borderless: true, row_props: Vec::new(), indent: None };
         let cell = |s: &str| Cell {
             blocks: vec![FBlock::Para({
                 let mut p = Para::default();

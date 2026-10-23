@@ -179,6 +179,9 @@ pub struct Para {
     /// Tracked formatting change of the paragraph: the paragraph's formatting before it (kind,
     /// list, alignment, page break, spacing and borders of `old`; its inlines are unused).
     pub fmt_change: Option<Box<FmtChange<Para>>>,
+    /// The text size of the paragraph mark, points (Lithora: RTF): an empty paragraph is as
+    /// tall as its mark.
+    pub mark_size: Option<f32>,
 }
 
 impl Para {
@@ -306,6 +309,9 @@ pub struct FTable {
     /// Each row's height and keep-together setting, by row index (missing = automatic).
     /// Lithora addition: RTF `\trrh` / `\trkeep`.
     pub row_props: Vec<RowProps>,
+    /// Where the table's left edge stands from the margin, in points, as Word 2013 and later
+    /// place it (Lithora addition: RTF `\trleft`). `None` = at the margin.
+    pub indent: Option<f32>,
 }
 
 impl FTable {
@@ -574,6 +580,9 @@ impl<'a> Builder<'a> {
             out.props.keep_next = Some(true);
         }
         out.section.clone_from(&p.section);
+        if p.mark_size.is_some() {
+            out.mark.size = p.mark_size;
+        }
         // Inlines are appended in order, so build the runs directly: inserting each one through
         // `Paragraph::insert_text` rescans every earlier run and is quadratic in their number.
         for i in &p.inlines {
@@ -753,6 +762,7 @@ impl<'a> Builder<'a> {
         if t.borderless {
             tb.props.style = None;
         }
+        tb.props.indent = t.indent;
         if t.widths.len() == cols && t.widths.iter().all(|w| w.is_finite() && *w > 1.0) {
             tb.grid = t.widths.iter().map(|w| w.clamp(6.0, 1584.0)).collect();
         }
@@ -914,6 +924,25 @@ fn fmt_of(doc: &Document, cp: &CharProps, in_code: bool) -> Fmt {
     }
 }
 
+/// Fill in what `f` leaves to the paragraph style: size, font, bold, italic and colour as the
+/// text shows them (Lithora).
+fn shown_style_fmt(doc: &Document, para_style: Option<&str>, table: Option<&wordcraft_doc::styles::TableStyleProps>, cp: &CharProps, in_code: bool, f: &mut Fmt) {
+    let rc = doc.styles.resolve_char_in(para_style, table.map(|t| &t.chr), cp);
+    if f.size.is_none() {
+        f.size = Some(rc.size);
+    }
+    if f.font.is_none() && !f.code && !in_code && !rc.font.is_empty() {
+        f.font = Some(rc.font.clone());
+    }
+    f.bold |= rc.bold;
+    f.italic |= rc.italic;
+    if f.color.is_none()
+        && let TextColor::Rgb(c) = rc.color
+    {
+        f.color = Some(c);
+    }
+}
+
 /// Revision `i` as a flow mark (unknown author and date when there is none).
 fn rev_mark(doc: &Document, i: u32) -> RevMark {
     doc.revisions.get(i as usize).map(|r| RevMark { author: r.author.clone(), date: r.date.clone(), id: Some(i) }).unwrap_or_default()
@@ -966,18 +995,33 @@ fn media_ext(key: &str, data: &[u8]) -> String {
     }
 }
 
+/// The spacing and indents a paragraph shows, its style's included (Lithora: so formats that
+/// write them, RTF, keep the page looking the same after saving).
+fn resolved_spacing(doc: &Document, props: &ParaProps, table: Option<&wordcraft_doc::styles::TableStyleProps>) -> Spacing {
+    let rp = doc.styles.resolve_para_in(props, table.map(|t| &t.para));
+    Spacing {
+        before: Some(rp.space_before),
+        after: Some(rp.space_after),
+        line: Some(rp.line_spacing),
+        left: Some(rp.indent_left),
+        right: Some(rp.indent_right),
+        first: Some(rp.indent_first),
+    }
+}
+
 /// A document paragraph as flow paragraphs: a page break character inside the text ends the
 /// paragraph, and the text after it starts a new one that carries `page_break`.
 pub fn flow_paras(doc: &Document, p: &Paragraph) -> Vec<Para> {
-    flow_paras_in(doc, p, false)
+    flow_paras_in(doc, p, false, None)
 }
 
 /// [`flow_paras`]; `tracked` keeps tracked changes: deleted text stays, and text carries its
 /// insertion and deletion marks.
-fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool) -> Vec<Para> {
+fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool, table: Option<&wordcraft_doc::styles::TableStyleProps>) -> Vec<Para> {
     let (kind, list) = para_kind(doc, p);
     let mut done: Vec<Para> = Vec::new();
     let borders = if kind == Kind::Rule { None } else { p.props.borders.filter(|b| b.any_visible()) };
+    let spacing = resolved_spacing(doc, &p.props, table);
     let mut out = Para {
         kind,
         list,
@@ -985,12 +1029,13 @@ fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool) -> Vec<Para> {
         page_break: p.props.page_break_before.unwrap_or(false),
         keep_next: p.props.keep_next.unwrap_or(false),
         inlines: Vec::new(),
-        spacing: Spacing::default(),
+        spacing,
         borders,
         section: None,
         mark_ins: None,
         mark_del: None,
         fmt_change: None,
+        mark_size: tracked.then(|| doc.styles.resolve_char_in(p.props.style.as_deref(), table.map(|t| &t.chr), &p.mark).size),
     };
     let in_code = kind == Kind::Code;
     let mut k = 0usize;
@@ -1001,8 +1046,15 @@ fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool) -> Vec<Para> {
         let hidden_text = props.hidden.unwrap_or(false) || (props.del.is_some() && !tracked);
         let mut f = fmt_of(doc, props, in_code);
         if tracked {
+            // Lithora: RTF and ODT copies carry the formatting the text shows, its paragraph
+            // style's included, so the text keeps its size and font after saving.
+            shown_style_fmt(doc, p.props.style.as_deref(), table, props, in_code, &mut f);
             (f.ins, f.del) = rev_marks(doc, props);
-            f.fmt_change = props.fmt_change.as_deref().map(|c| Box::new(FmtChange { mark: rev_mark(doc, c.rev), old: fmt_of(doc, &c.old, in_code) }));
+            f.fmt_change = props.fmt_change.as_deref().map(|c| {
+                let mut old = fmt_of(doc, &c.old, in_code);
+                shown_style_fmt(doc, p.props.style.as_deref(), table, &c.old, in_code, &mut old);
+                Box::new(FmtChange { mark: rev_mark(doc, c.rev), old })
+            });
         }
         let mut buf = String::new();
         for c in text.chars() {
@@ -1016,12 +1068,13 @@ fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool) -> Vec<Para> {
                         page_break: true,
                         keep_next: p.props.keep_next.unwrap_or(false),
                         inlines: Vec::new(),
-                        spacing: Spacing::default(),
+                        spacing,
                         borders,
                         section: None,
                         mark_ins: None,
                         mark_del: None,
                         fmt_change: None,
+                        mark_size: None,
                     };
                     let prev = std::mem::replace(&mut out, next);
                     if prev.inlines.is_empty() {
@@ -1120,15 +1173,20 @@ fn flow_paras_in(doc: &Document, p: &Paragraph, tracked: bool) -> Vec<Para> {
 }
 
 fn flow_blocks(doc: &Document, bl: &Blocks, depth: usize, tracked: bool) -> Vec<FBlock> {
+    flow_blocks_in(doc, bl, depth, tracked, None)
+}
+
+/// [`flow_blocks`] of a table cell's blocks; `table` is the table's style (Lithora).
+fn flow_blocks_in(doc: &Document, bl: &Blocks, depth: usize, tracked: bool, table: Option<&wordcraft_doc::styles::TableStyleProps>) -> Vec<FBlock> {
     let mut out = Vec::new();
     for b in bl {
         match &**b {
-            Block::Para(p) => out.extend(flow_paras_in(doc, p, tracked).into_iter().map(FBlock::Para)),
+            Block::Para(p) => out.extend(flow_paras_in(doc, p, tracked, table).into_iter().map(FBlock::Para)),
             Block::Table(t) if depth < MAX_DEPTH => out.push(FBlock::Table(flow_table(doc, t, depth, tracked))),
             Block::Table(t) => {
                 for r in &t.rows {
                     for c in &r.cells {
-                        out.extend(flow_blocks(doc, &c.blocks, depth, tracked));
+                        out.extend(flow_blocks_in(doc, &c.blocks, depth, tracked, table));
                     }
                 }
             }
@@ -1138,9 +1196,13 @@ fn flow_blocks(doc: &Document, bl: &Blocks, depth: usize, tracked: bool) -> Vec<
 }
 
 fn flow_table(doc: &Document, t: &Table, depth: usize, tracked: bool) -> FTable {
+    let style = t.props.style.as_deref().and_then(|id| doc.styles.table_style(id));
     let mut rows = Vec::new();
     for (ri, r) in t.rows.iter().enumerate() {
-        let header = r.props.header || (ri == 0 && t.props.look.header_row && t.rows.len() > 1);
+        // Lithora: only a row marked to repeat is a header row. A table style's "header row"
+        // look is shading and bold from the style, not a row that repeats on every page; taking
+        // it for one made RTF and ODT copies bold the first row and repeat it on each page.
+        let header = r.props.header;
         let mut cells = Vec::new();
         for (ci, c) in r.cells.iter().enumerate() {
             let mut rowspan = 1;
@@ -1155,7 +1217,7 @@ fn flow_table(doc: &Document, t: &Table, depth: usize, tracked: bool) -> FTable 
                 }
             }
             cells.push(Cell {
-                blocks: flow_blocks(doc, &c.blocks, depth + 1, tracked),
+                blocks: flow_blocks_in(doc, &c.blocks, depth + 1, tracked, style.as_ref()),
                 colspan: c.span() as u32,
                 rowspan,
                 covered: c.props.vmerge == VMerge::Continue,
@@ -1176,7 +1238,24 @@ fn flow_table(doc: &Document, t: &Table, depth: usize, tracked: bool) -> FTable 
         .iter()
         .map(|r| RowProps { height: r.props.height, height_rule: r.props.height_rule, cant_split: r.props.cant_split, ..Default::default() })
         .collect();
-    FTable { rows, widths: t.grid.clone(), borderless, row_props }
+    // The edge as the layout puts it: older Word files line the first cell's text up with the
+    // margin, so their edge stands out by the cell's left margin.
+    let own = t.props.indent.unwrap_or(0.0);
+    let indent = if doc.settings.compat_mode >= 15 {
+        own
+    } else {
+        let def = t.props.cell_margins.or(style.as_ref().and_then(|s| s.parts.cell_margins)).unwrap_or([0.0, 5.4, 0.0, 5.4]);
+        let left = t.rows.first().and_then(|r| r.cells.first()).map_or(def, |c| c.props.resolved_margins(def))[1];
+        own - left
+    };
+    let indent = (indent.is_finite() && indent.abs() > 0.01).then_some(indent.clamp(-1584.0, 1584.0));
+    FTable { rows, widths: t.grid.clone(), borderless, row_props, indent }
+}
+
+/// A header, footer or other part's blocks as a flow, keeping tracked changes (Lithora: for the
+/// RTF writer's headers and footers).
+pub fn flow_part(doc: &Document, blocks: &Blocks) -> Vec<FBlock> {
+    flow_blocks(doc, blocks, 0, true)
 }
 
 /// The document body as a flow.
@@ -1533,7 +1612,7 @@ mod tests {
         // Many rows each carrying the maximum rowspan would be O(rows × rowspan) covered cells;
         // the work cap must keep insertion bounded (and quick) instead of exhausting memory.
         let mut t =
-            FTable { rows: (0..20_000).map(|_| vec![Cell { rowspan: 1000, ..Default::default() }]).collect(), widths: Vec::new(), borderless: false, row_props: Vec::new() };
+            FTable { rows: (0..20_000).map(|_| vec![Cell { rowspan: 1000, ..Default::default() }]).collect(), widths: Vec::new(), borderless: false, row_props: Vec::new(), indent: None };
         t.insert_covered();
         assert!(t.rows.iter().all(|r| r.len() <= 64), "a row grew past the column cap");
     }
@@ -1584,6 +1663,7 @@ mod tests {
             widths: vec![],
             borderless: false,
             row_props: Vec::new(),
+            indent: None,
         };
         t.insert_covered();
         assert_eq!(t.rows[1].len(), 2);

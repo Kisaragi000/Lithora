@@ -16,10 +16,16 @@ pub fn run() {
         // which shows it in a new tab.
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             let files = engine::files_from_args(args.into_iter().skip(1), std::path::Path::new(&cwd));
-            if !files.is_empty() {
-                let _ = app.emit("open-files", files);
+            // The main window opens them, or another Lithora window when it was closed.
+            let window = app
+                .get_webview_window("main")
+                .or_else(|| app.webview_windows().into_values().next());
+            if !files.is_empty()
+                && let Some(w) = &window
+            {
+                let _ = app.emit_to(w.label(), "open-files", files);
             }
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = window {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -31,6 +37,7 @@ pub fn run() {
         .manage(engine::EngineState::default())
         .invoke_handler(tauri::generate_handler![
             engine::engine_open,
+            window_layout::open_doc_window,
             engine::engine_new,
             engine::engine_close,
             engine::engine_state,

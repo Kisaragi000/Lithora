@@ -92,6 +92,9 @@ pub struct DocState {
     pub story: &'static str,
     /// The cursor is in a table.
     pub in_table: bool,
+    /// Vertical alignment where the cursor is: the table cell's in a table, otherwise the
+    /// page's (top, center, justify or bottom).
+    pub valign: &'static str,
     /// Track Changes is on.
     pub track_changes: bool,
     /// The selected picture or shape's frame, when one is selected.
@@ -203,6 +206,7 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         align,
         story: story_kind(s),
         in_table: s.sel.focus.path.cell().is_some(),
+        valign: vertical_align(s),
         track_changes: s.doc.settings.track_changes,
         object,
         line_spacing: s
@@ -216,6 +220,31 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         painter: s.painter.is_some(),
         marks: s.view.marks,
         encrypted: s.password.is_some(),
+    }
+}
+
+/// The vertical alignment of the cursor's table cell, or of its page outside tables.
+fn vertical_align(s: &Session) -> &'static str {
+    use wordcraft_engine::doc::props::VAlign;
+    use wordcraft_engine::doc::section::PageVAlign;
+    if let Some((table, r, c)) = s.sel.focus.path.cell() {
+        let va = s
+            .doc
+            .table(s.sel.focus.story, &table)
+            .and_then(|t| t.rows.get(r)?.cells.get(c))
+            .and_then(|cell| cell.props.valign)
+            .unwrap_or_default();
+        return match va {
+            VAlign::Top => "top",
+            VAlign::Center => "center",
+            VAlign::Bottom => "bottom",
+        };
+    }
+    match wordcraft_engine::cmd::page::sect(s).valign {
+        PageVAlign::Top => "top",
+        PageVAlign::Center => "center",
+        PageVAlign::Justify => "justify",
+        PageVAlign::Bottom => "bottom",
     }
 }
 

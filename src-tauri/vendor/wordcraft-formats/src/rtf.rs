@@ -109,6 +109,11 @@ struct Writer {
     sections: Vec<wordcraft_doc::SectionProps>,
     /// The section being written.
     sect_i: usize,
+    /// Each section's header and footer groups, parallel to `sections` (Lithora).
+    section_hf: Vec<String>,
+    /// The document's default text size, half points (Lithora): `\\plain` resets to 12 pt, and
+    /// an empty paragraph is as tall as its mark's text.
+    def_size: Option<i32>,
 }
 
 /// `\sectd` and a section's formatting, in the words the reader reads back.
@@ -155,11 +160,49 @@ fn sect_words(s: &wordcraft_doc::SectionProps) -> String {
     if s.title_page {
         o.push_str("\\titlepg");
     }
+    o.push_str(match s.valign {
+        wordcraft_doc::section::PageVAlign::Top => "",
+        wordcraft_doc::section::PageVAlign::Center => "\\vertalc",
+        wordcraft_doc::section::PageVAlign::Bottom => "\\vertalb",
+        wordcraft_doc::section::PageVAlign::Justify => "\\vertalj",
+    });
     o.push('\n');
     o
 }
 
 const HEAD_SIZES: [f32; 6] = [20.0, 16.0, 14.0, 12.0, 12.0, 11.0];
+
+/// Paragraph spacing and indent control words (Lithora): `\sb`, `\sa`, `\sl`/`\slmult`, and
+/// `\li`, `\ri`, `\fi` (a list item writes its left and first-line indents with its list).
+fn spacing_words(sp: &model::Spacing, list: bool) -> String {
+    use wordcraft_doc::props::LineSpacing;
+    let tw = |v: f32| (v * 20.0).round() as i64;
+    let mut o = String::new();
+    if let Some(v) = sp.before {
+        o.push_str(&format!("\\sb{}", tw(v.max(0.0))));
+    }
+    if let Some(v) = sp.after {
+        o.push_str(&format!("\\sa{}", tw(v.max(0.0))));
+    }
+    match sp.line {
+        Some(LineSpacing::Multiple(m)) => o.push_str(&format!("\\sl{}\\slmult1", (m * 240.0).round() as i64)),
+        Some(LineSpacing::Exactly(v)) => o.push_str(&format!("\\sl-{}\\slmult0", tw(v.max(1.0)))),
+        Some(LineSpacing::AtLeast(v)) => o.push_str(&format!("\\sl{}\\slmult0", tw(v.max(0.0)))),
+        None => {}
+    }
+    if !list {
+        if let Some(v) = sp.left {
+            o.push_str(&format!("\\li{}", tw(v)));
+        }
+        if let Some(v) = sp.first {
+            o.push_str(&format!("\\fi{}", tw(v)));
+        }
+    }
+    if let Some(v) = sp.right {
+        o.push_str(&format!("\\ri{}", tw(v)));
+    }
+    o
+}
 
 fn style_num(k: Kind) -> Option<u32> {
     match k {
@@ -187,6 +230,25 @@ fn rtf_border_style(s: wordcraft_doc::props::BorderStyle) -> &'static str {
 }
 
 impl Writer {
+    /// A section's header and footer groups (`{\\header …}`, `{\\headerf …}`, `{\\footerl …}`…)
+    /// (Lithora).
+    fn headers_footers(&mut self, doc: &Document, s: &wordcraft_doc::SectionProps) -> String {
+        let mut out = String::new();
+        let sets = [("header", &s.headers), ("footer", &s.footers)];
+        for (word, set) in sets {
+            for (suffix, id) in [("", set.default), ("f", set.first), ("l", set.even)] {
+                let Some(part) = id.and_then(|i| doc.parts.get(&i)) else { continue };
+                let blocks = model::flow_part(doc, &part.blocks);
+                let mut body = String::new();
+                let (sections, sect_i) = (std::mem::take(&mut self.sections), self.sect_i);
+                self.blocks(&blocks, false, "\\par", &mut body, 1);
+                (self.sections, self.sect_i) = (sections, sect_i);
+                out.push_str(&format!("{{\\{word}{suffix} {body}}}\n"));
+            }
+        }
+        out
+    }
+
     fn write_border(&mut self, prefix: &str, side: char, b: wordcraft_doc::props::Border, out: &mut String) {
         out.push_str(&format!("\\{prefix}{side}"));
         out.push_str(rtf_border_style(b.style));
@@ -447,7 +509,11 @@ impl Writer {
         }
         if let (Some(li), Some((n, label))) = (p.list, &ls) {
             let lv = li.level.min(8);
-            out.push_str(&format!("\\ls{n}\\ilvl{lv}\\fi-360\\li{}", 720 * (u32::from(lv) + 1)));
+            // The item's own indents when it has them (Lithora), else the usual ones per level.
+            let tw = |v: f32| (v * 20.0).round() as i64;
+            let li = p.spacing.left.map_or(720 * (i64::from(lv) + 1), tw);
+            let fi = p.spacing.first.map_or(-360, tw);
+            out.push_str(&format!("\\ls{n}\\ilvl{lv}\\fi{fi}\\li{li}"));
             // The closing brace ends the label; a space after it would be text.
             out.push_str(&format!(" {{\\listtext\\pard\\plain {}\\tab}}", esc(label)));
         } else {
@@ -456,6 +522,10 @@ impl Writer {
         self.base = style_fmt(p.kind);
         self.inlines(&p.inlines, out);
         self.base = Fmt::default();
+        // Lithora: the mark's own size (an empty paragraph is as tall as it).
+        if let Some(sz) = p.mark_size.filter(|s| s.is_finite()) {
+            out.push_str(&format!("\\fs{} ", (sz * 2.0).round().clamp(2.0, 3276.0) as i32));
+        }
         // A tracked paragraph mark is the `\par` inside the revision's group.
         let marks = self.rev_ctl(p.mark_ins.as_deref(), p.mark_del.as_deref());
         if end == "\\par" && !marks.is_empty() {
@@ -469,6 +539,9 @@ impl Writer {
     /// The paragraph formatting control words of `p`, from `\pard\plain` (its list left out).
     fn para_ctl(&mut self, p: &Para, intbl: bool) -> String {
         let mut out = String::from("\\pard\\plain");
+        if let Some(hp) = self.def_size {
+            out.push_str(&format!("\\fs{hp}"));
+        }
         if intbl {
             out.push_str("\\intbl");
         }
@@ -502,6 +575,8 @@ impl Writer {
             Kind::Title => out.push_str("\\sa80\\fs56"),
             Kind::Normal => {}
         }
+        // Lithora: the spacing and indents the paragraph shows, so the page keeps its look.
+        out.push_str(&spacing_words(&p.spacing, p.list.is_some()));
         out
     }
 
@@ -517,7 +592,11 @@ impl Writer {
                     // A paragraph that ends a section ends it with `\sect`; the next one begins.
                     if p.section.is_some() && !intbl && depth == 0 && self.sect_i + 1 < self.sections.len() {
                         self.sect_i += 1;
-                        end = format!("\\sect\n{}", self.sections.get(self.sect_i).map(sect_words).unwrap_or_default());
+                        end = format!(
+                            "\\sect\n{}{}",
+                            self.sections.get(self.sect_i).map(sect_words).unwrap_or_default(),
+                            self.section_hf.get(self.sect_i).map(String::as_str).unwrap_or_default()
+                        );
                         // A body that ends on the break keeps its last section: an empty paragraph holds it.
                         if i + 1 == n {
                             end.push_str("\\pard\\plain \\par");
@@ -595,7 +674,8 @@ impl Writer {
             vec![total / cols as f32; cols]
         };
         for (ri, row) in t.rows.iter().enumerate() {
-            out.push_str("\\trowd\\trgaph108\\trleft0");
+            let left = (t.indent.unwrap_or(0.0) * 20.0).round() as i64;
+            out.push_str(&format!("\\trowd\\trgaph108\\trleft{left}"));
             if !row.is_empty() && row.iter().all(|c| c.header) {
                 out.push_str("\\trhdr");
             }
@@ -637,7 +717,7 @@ impl Writer {
                     let i = self.t.color(s);
                     out.push_str(&format!("\\clcbpat{i}"));
                 }
-                out.push_str(&format!("\\cellx{}", x.round() as i64));
+                out.push_str(&format!("\\cellx{}", x.round() as i64 + left));
             }
             out.push('\n');
             for c in row {
@@ -756,15 +836,22 @@ pub fn export(doc: &Document) -> String {
         base: Fmt::default(),
         sections: Vec::new(),
         sect_i: 0,
+        section_hf: Vec::new(),
+        def_size: Some((doc.styles.resolve_char(None, &Default::default()).size * 2.0).round().clamp(2.0, 3276.0) as i32)
+            .filter(|&hp| hp != 24),
     };
     let mut body = String::new();
     // Every section starts with its own `\sectd`; `\sect` breaks only where there are several.
     let secs: Vec<wordcraft_doc::SectionProps> = doc.sections().into_iter().map(|(_, s)| s.clone()).collect();
+    // Lithora: each section's headers and footers, which the copy kept none of before.
+    let hf: Vec<String> = secs.iter().map(|s| w.headers_footers(doc, s)).collect();
     if let Some(first) = secs.first() {
         body.push_str(&sect_words(first));
+        body.push_str(hf.first().map(String::as_str).unwrap_or_default());
     }
     if secs.len() > 1 {
         w.sections = secs;
+        w.section_hf = hf;
     }
     w.blocks(&flow.blocks, false, "\\par", &mut body, 0);
     export_with(&flow.meta, &w, &body, &doc.last_section)
@@ -779,6 +866,9 @@ fn export_with(m: &Meta, w: &Writer, body: &str, sec: &wordcraft_doc::SectionPro
     out.push_str("}\n{\\colortbl;");
     for c in &w.t.colors {
         out.push_str(&format!("\\red{}\\green{}\\blue{};", c.0, c.1, c.2));
+    }
+    if let Some(hp) = w.def_size {
+        out.push_str(&format!("}}\n{{\\*\\defchp \\fs{hp}"));
     }
     out.push_str("}\n{\\*\\generator WordCraft;}\n{\\stylesheet{\\s0\\snext0 Normal;}");
     for n in 1..=6u32 {
@@ -923,6 +1013,8 @@ struct Output {
     row_height: i32,
     row_keep: bool,
     table_row_props: Vec<wordcraft_doc::props::RowProps>,
+    row_left: i32,
+    table_left: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -1081,6 +1173,8 @@ struct SecFmt {
     pgn_start: Option<i32>,
     pgn_fmt: wordcraft_doc::section::NumFormat,
     title_page: bool,
+    /// Lithora: the page's vertical alignment (`\vertalc`…).
+    valign: wordcraft_doc::section::PageVAlign,
 }
 
 impl SecFmt {
@@ -1114,6 +1208,7 @@ impl SecFmt {
         }
         s.page_num_format = self.pgn_fmt;
         s.title_page = self.title_page;
+        s.valign = self.valign;
         s
     }
 }
@@ -1203,8 +1298,15 @@ struct Reader {
     row_keep: bool,
     /// Each finished row's height and keep setting, parallel to `table`.
     table_row_props: Vec<wordcraft_doc::props::RowProps>,
+    /// The row's left edge (`\trleft`, twips) and the table's, its first row's (Lithora).
+    row_left: i32,
+    table_left: Option<i32>,
     created: Option<(u32, u32, u32, u32, u32)>,
     in_creatim: bool,
+    /// Inside `{\*\defchp …}` (its group depth), and the default text size it names, points
+    /// (Lithora).
+    defchp_depth: Option<usize>,
+    default_size: Option<f32>,
     rule_pending: bool,
     info_depth: Option<usize>,
 }
@@ -1231,6 +1333,8 @@ impl Reader {
         std::mem::swap(&mut o.row_height, &mut self.row_height);
         std::mem::swap(&mut o.row_keep, &mut self.row_keep);
         std::mem::swap(&mut o.table_row_props, &mut self.table_row_props);
+        std::mem::swap(&mut o.row_left, &mut self.row_left);
+        std::mem::swap(&mut o.table_left, &mut self.table_left);
         o
     }
 
@@ -1303,6 +1407,10 @@ impl Reader {
         match w {
             "sectd" => *sec = SecFmt::default(),
             "titlepg" => sec.title_page = on,
+            "vertalt" => sec.valign = wordcraft_doc::section::PageVAlign::Top,
+            "vertalc" => sec.valign = wordcraft_doc::section::PageVAlign::Center,
+            "vertalb" => sec.valign = wordcraft_doc::section::PageVAlign::Bottom,
+            "vertalj" => sec.valign = wordcraft_doc::section::PageVAlign::Justify,
             "pgwsxn" => sec.page.w = Some(pv),
             "pghsxn" => sec.page.h = Some(pv),
             "marglsxn" => sec.page.left = Some(pv),
@@ -1369,6 +1477,9 @@ impl Reader {
                 self.in_creatim = false;
             }
             _ => {}
+        }
+        if self.defchp_depth.is_some_and(|d| self.stack.len() <= d) {
+            self.defchp_depth = None;
         }
         let Some(mut prev) = self.stack.pop() else { return };
         // The end of old formatting read in the body: the formatting it holds is the change's
@@ -1802,6 +1913,8 @@ impl Reader {
         let read = std::mem::take(&mut self.para);
         let props = self.para_props(&self.st);
         let mut p = Para { inlines: read.inlines, mark_ins: read.mark_ins, mark_del: read.mark_del, ..props };
+        // Lithora: the mark's size, which sets an empty paragraph's height.
+        p.mark_size = self.st.fmt.size;
         if p.kind == Kind::Normal && p.inlines.is_empty() && self.rule_pending {
             p.kind = Kind::Rule;
         }
@@ -1876,6 +1989,12 @@ impl Reader {
         }
         if !out.is_empty() && self.table.len() < wordcraft_doc::table::MAX_ROWS {
             rights.truncate(out.len());
+            // Cell edges count from the row's left edge; the table stands where its first row does.
+            let left = self.row_left;
+            rights.iter_mut().for_each(|r| *r = r.saturating_sub(left));
+            if self.table.is_empty() {
+                self.table_left = Some(left);
+            }
             self.table.push(out);
             self.table_rights.push(rights);
             use wordcraft_doc::props::{HeightRule, RowProps};
@@ -1903,7 +2022,8 @@ impl Reader {
             let widths = column_grid(&mut rows, &rights);
             let row_props = std::mem::take(&mut self.table_row_props);
             // Word draws only the borders the cells name: no grid style, each cell its own.
-            self.body.push(FBlock::Table(FTable { rows, widths, borderless: true, row_props }));
+            let indent = self.table_left.take().filter(|&l| l != 0).map(|l| l as f32 / 20.0);
+            self.body.push(FBlock::Table(FTable { rows, widths, borderless: true, row_props, indent }));
         }
     }
 
@@ -1914,6 +2034,12 @@ impl Reader {
         let on = p != Some(0);
         let pv = p.unwrap_or(0);
         if self.st.dest == Dest::Skip && !(self.in_info() && matches!(w, "title" | "author" | "subject" | "keywords" | "doccomm" | "creatim")) {
+            if self.defchp_depth.is_some() {
+                if w == "fs" && pv > 0 {
+                    self.default_size = Some((pv as f32 / 2.0).clamp(1.0, 1638.0));
+                }
+                return;
+            }
             if self.in_creatim {
                 let v = pv.clamp(0, 9999) as u32;
                 let c = self.created.get_or_insert((0, 1, 1, 0, 0));
@@ -1967,6 +2093,10 @@ impl Reader {
             | "nofwords" | "nofchars" | "edmins" | "vern" | "themedata" | "colorschememapping" | "latentstyles" | "datastore" | "xmlnstbl"
             | "rsidtbl" | "generator" | "mmathPr" | "pgdsctbl" | "filetbl" | "listpicture" | "userprops" | "docvar" | "objdata" | "fontemb"
             | "fontfile" | "panose" | "falt" | "mhtmltag" | "htmltag" | "pnseclvl" | "background" | "sp" | "pn" | "pgptbl" => Some(Dest::Skip),
+            "defchp" => {
+                self.defchp_depth = Some(self.stack.len());
+                Some(Dest::Skip)
+            }
             "creatim" if self.in_info() => {
                 self.in_creatim = true;
                 Some(Dest::Skip)
@@ -2289,10 +2419,12 @@ impl Reader {
                 self.row_header = false;
                 self.row_height = 0;
                 self.row_keep = false;
+                self.row_left = 0;
             }
             "trhdr" => self.row_header = true,
             "trrh" => self.row_height = pv.clamp(-31680, 31680),
             "trkeep" => self.row_keep = on,
+            "trleft" => self.row_left = pv.clamp(-31680, 31680),
             "clvmgf" => self.def_cur.vmerge = 1,
             "clvmrg" => self.def_cur.vmerge = 2,
             "clmgf" => self.def_cur.hmerge = 1,
@@ -2641,6 +2773,8 @@ struct Parsed {
     /// The last section's properties (the others are on the paragraphs that end them).
     last_section: wordcraft_doc::SectionProps,
     default_font: Option<String>,
+    /// The default text size (`\defchp\fs`), points (Lithora).
+    default_size: Option<f32>,
     /// Each section's headers and footers, in order, the last section's last.
     headers_footers: Vec<Vec<(HeaderFooter, Vec<FBlock>)>>,
 }
@@ -2845,7 +2979,7 @@ fn parse_full(bytes: &[u8]) -> Result<Parsed, String> {
         blocks.push(FBlock::Para(Para::default()));
     }
     let default_font = r.fonts.get(&r.deff).filter(|n| !model::is_mono(n)).cloned();
-    Ok(Parsed { flow: Flow { blocks, meta: r.meta }, page: r.page, last_section, default_font, headers_footers })
+    Ok(Parsed { flow: Flow { blocks, meta: r.meta }, page: r.page, last_section, default_font, default_size: r.default_size, headers_footers })
 }
 
 /// The column grid of a table from its rows' cell right edges: every distinct edge starts a grid
@@ -2887,7 +3021,7 @@ fn column_grid(rows: &mut [Vec<Cell>], rights: &[Vec<i32>]) -> Vec<f32> {
 
 /// Parse RTF bytes into a document.
 pub fn import(bytes: &[u8]) -> Result<Document, String> {
-    let Parsed { flow, last_section, default_font, headers_footers, .. } = parse_full(bytes)?;
+    let Parsed { flow, last_section, default_font, default_size, headers_footers, .. } = parse_full(bytes)?;
     let mut doc = model::to_doc_in(&flow, last_section);
     // Each section's own headers and footers; those it leaves out stay linked to the previous.
     let mut sets = Vec::with_capacity(headers_footers.len());
@@ -2927,6 +3061,9 @@ pub fn import(bytes: &[u8]) -> Result<Document, String> {
     dp.line_spacing = Some(wordcraft_doc::props::LineSpacing::Multiple(1.0));
     if default_font.is_some() {
         doc.styles.default_chr.font = default_font;
+    }
+    if default_size.is_some() {
+        doc.styles.default_chr.size = default_size;
     }
     Ok(doc)
 }
@@ -3901,6 +4038,8 @@ mod tests {
             base: Fmt::default(),
             sections: Vec::new(),
             sect_i: 0,
+            section_hf: Vec::new(),
+            def_size: None,
         };
         let mut out = String::new();
         w.para(&p, false, None, "\\par", &mut out);

@@ -1561,7 +1561,7 @@ impl TableB {
     fn finish(self) -> FTable {
         // A column without a width leaves the whole grid to the equal split.
         let widths = if self.widths.iter().all(|w| *w > 0.0) { self.widths } else { Vec::new() };
-        FTable { rows: self.rows, widths, borderless: false, row_props: Vec::new() }
+        FTable { rows: self.rows, widths, borderless: false, row_props: Vec::new(), indent: None }
     }
 }
 
