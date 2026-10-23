@@ -7,14 +7,14 @@ import React, { useCallback, useDeferredValue, useEffect, useRef, useState } fro
 import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { BookOpen, CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
 import { listenForFileDrops } from './fileDrop';
 import { DocState, engine, OPEN_EXTENSIONS, ProofIssue, RecoveredDoc, SAVE_FILTERS } from './engine';
-import { PageView, PageViewHandle } from './PageView';
+import { forgetScroll, PageView, PageViewHandle } from './PageView';
 import { Ribbon, RibbonAction } from './Ribbon';
 import { strings } from './strings';
 import { UpdateButton } from './UpdateButton';
@@ -44,6 +44,12 @@ import {
   WatermarkDialog,
 } from './WordDialogs';
 import type { ParagraphInfo } from './engine';
+
+/** The document this window was opened for, when a tab was dragged out into it. */
+const OWN_DOC = (() => {
+  const v = Number(new URLSearchParams(window.location.search).get('doc'));
+  return Number.isInteger(v) && v > 0 ? v : null;
+})();
 
 /** Pictures dropped onto a page go into the document; other files open in tabs. */
 const PICTURE_FILE = /\.(png|jpe?g|gif|bmp|webp|emf|wmf)$/i;
@@ -321,6 +327,7 @@ export const DesktopApp: React.FC = () => {
         if (!sure) return;
       }
       await engine.close(doc.id).catch(() => undefined);
+      forgetScroll(doc.id);
       const list = docsRef.current;
       const index = list.findIndex((d) => d.id === doc.id);
       const rest = list.filter((d) => d.id !== doc.id);
@@ -330,12 +337,57 @@ export const DesktopApp: React.FC = () => {
     [lang],
   );
 
+  // Dragging a tab out of the tab bar opens its document in a window of its own, like Acrobat.
+  const [tabDrag, setTabDrag] = useState<{ id: number; name: string; x: number; y: number; out: boolean } | null>(null);
+  const tabBar = useRef<HTMLDivElement>(null);
+  const tearOff = useCallback(
+    async (doc: DocState, screenX: number, screenY: number) => {
+      const list = docsRef.current;
+      if (list.length < 2) return;
+      const index = list.findIndex((d) => d.id === doc.id);
+      const rest = list.filter((d) => d.id !== doc.id);
+      docsRef.current = rest;
+      setDocs(rest);
+      setActiveId((current) => (current === doc.id ? (rest[Math.min(index, rest.length - 1)]?.id ?? null) : current));
+      try {
+        await engine.openDocWindow(doc.id, doc.name, screenX, screenY);
+      } catch (e) {
+        // The window didn't open: the tab comes back.
+        docsRef.current = [...docsRef.current, doc];
+        setDocs((now) => [...now, doc]);
+        showError(String(e));
+      }
+    },
+    [showError],
+  );
+  /** Whether a point (window coordinates) is far enough from the tab bar to drop a tab there. */
+  const outsideTabs = (x: number, y: number) => {
+    const bar = tabBar.current?.getBoundingClientRect();
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return true;
+    return bar ? y > bar.bottom + 60 || y < bar.top - 40 : false;
+  };
+
+  // A window a tab was dragged out into closes once its last document is closed.
+  const hadDocs = useRef(false);
+  useEffect(() => {
+    if (docs.length > 0) hadDocs.current = true;
+    else if (OWN_DOC !== null && hadDocs.current) void getCurrentWindow().close();
+  }, [docs.length]);
+
   // Open files passed on the command line, else start with a blank document, like Word.
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     (async () => {
+      if (OWN_DOC !== null) {
+        // A window a tab was dragged out into: just that document.
+        const state = await engine.state(OWN_DOC);
+        docsRef.current = [state];
+        addDoc(state);
+        loadFonts(state.id);
+        return;
+      }
       const files = await engine.startupFiles().catch(() => [] as string[]);
       const opened = files.length > 0 ? await openPaths(files) : 0;
       if (opened === 0) {
@@ -348,7 +400,7 @@ export const DesktopApp: React.FC = () => {
       const left = await engine.recoveryList().catch(() => [] as RecoveredDoc[]);
       if (left.length > 0) setDialog({ kind: 'recovery', docs: left });
     })().catch((e) => showError(String(e)));
-  }, [loadFonts, newDocument, openPaths, showError]);
+  }, [addDoc, loadFonts, newDocument, openPaths, showError]);
 
   // Files dropped onto the window open in new tabs; pictures dropped onto a page go in there.
   const dropPictures = useRef<(paths: string[], at: { x: number; y: number }) => boolean>(() => false);
@@ -370,7 +422,8 @@ export const DesktopApp: React.FC = () => {
 
   // Files opened from the file manager while Lithora is already running come here, in new tabs.
   useEffect(() => {
-    const off = listen<string[]>('open-files', (e) => void openPaths(e.payload));
+    // Only this window's: with several windows open, one of them opens each file.
+    const off = getCurrentWebviewWindow().listen<string[]>('open-files', (e) => void openPaths(e.payload));
     return () => {
       void off.then((f) => f());
     };
@@ -382,14 +435,22 @@ export const DesktopApp: React.FC = () => {
     getCurrentWindow()
       .onCloseRequested(async (event) => {
         const unsaved = docsRef.current.filter((d) => d.dirty);
-        if (unsaved.length === 0) return;
-        const sure = await ask(`${unsaved.map((d) => d.name).join(', ')} ${strings[lang].unsavedClose}`, {
-          title: 'Lithora',
-          kind: 'warning',
-          okLabel: strings[lang].closeAnyway,
-          cancelLabel: strings[lang].keep,
-        });
-        if (!sure) event.preventDefault();
+        if (unsaved.length > 0) {
+          const sure = await ask(`${unsaved.map((d) => d.name).join(', ')} ${strings[lang].unsavedClose}`, {
+            title: 'Lithora',
+            kind: 'warning',
+            okLabel: strings[lang].closeAnyway,
+            cancelLabel: strings[lang].keep,
+          });
+          if (!sure) {
+            event.preventDefault();
+            return;
+          }
+        }
+        // A window a tab was dragged out into closes its documents; Lithora keeps running.
+        if (getCurrentWindow().label !== 'main') {
+          await Promise.all(docsRef.current.map((d) => engine.close(d.id).catch(() => undefined)));
+        }
       })
       .then((unlisten) => (stop = unlisten))
       .catch(() => undefined);
@@ -1038,7 +1099,7 @@ export const DesktopApp: React.FC = () => {
           </button>
         </div>
       ) : (
-      <div className="lithora-slim-scroll flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
+      <div ref={tabBar} className="lithora-slim-scroll flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
         {docs.map((d) => (
           <div
             key={d.id}
@@ -1047,6 +1108,28 @@ export const DesktopApp: React.FC = () => {
                 e.preventDefault();
                 void closeDoc(d);
               }
+            }}
+            onPointerDown={(e) => {
+              if (e.button !== 0 || docs.length < 2 || (e.target as HTMLElement).closest('button')) return;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const start = { x: e.clientX, y: e.clientY };
+              const el = e.currentTarget;
+              const move = (m: PointerEvent) => {
+                if (Math.hypot(m.clientX - start.x, m.clientY - start.y) < 8) return;
+                setTabDrag({ id: d.id, name: d.name, x: m.clientX, y: m.clientY, out: outsideTabs(m.clientX, m.clientY) });
+              };
+              const up = (u: PointerEvent) => {
+                el.removeEventListener('pointermove', move);
+                el.removeEventListener('pointerup', up);
+                el.removeEventListener('pointercancel', up);
+                setTabDrag(null);
+                if (u.type === 'pointerup' && Math.hypot(u.clientX - start.x, u.clientY - start.y) >= 8 && outsideTabs(u.clientX, u.clientY)) {
+                  void tearOff(d, u.screenX, u.screenY);
+                }
+              };
+              el.addEventListener('pointermove', move);
+              el.addEventListener('pointerup', up);
+              el.addEventListener('pointercancel', up);
             }}
             className={`group flex h-8 max-w-[220px] shrink-0 cursor-default items-center gap-2 rounded-t-md border-x border-t px-3 text-[13px] ${
               d.id === activeId ? 'border-slate-200 bg-white text-[#083B69]' : 'border-transparent text-slate-600 hover:bg-white/60'
@@ -1222,6 +1305,18 @@ export const DesktopApp: React.FC = () => {
         </div>
       )}
       {dragging && <DropOverlay label={t.dropToOpen} />}
+      {tabDrag && (
+        <div
+          className={`pointer-events-none fixed z-50 flex max-w-[260px] items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] shadow-lg ${
+            tabDrag.out ? 'border-[#376FA3] bg-white text-[#083B69]' : 'border-slate-200 bg-white/90 text-slate-600'
+          }`}
+          style={{ left: tabDrag.x + 12, top: tabDrag.y + 12 }}
+        >
+          <FileText className="h-3.5 w-3.5 shrink-0 text-[#376FA3]" />
+          <span className="truncate">{tabDrag.name}</span>
+          {tabDrag.out && <span className="shrink-0 text-[11px] text-[#376FA3]">{t.tearOffHint}</span>}
+        </div>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'print' && active && (
         <PrintDialog

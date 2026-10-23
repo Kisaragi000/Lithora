@@ -12,3 +12,10 @@ Lithora's changes:
   Before, every row was as tall as its text, so forms with tall answer rows came out shorter
   than in Word and rows split across pages in the wrong places.
 - ODT and HTML files name Lithora, not WordCraft, as the program that wrote them.
+- Saving as RTF keeps the page looking the same (0.5.1): each paragraph's spacing, line
+  spacing and indents (its style's included); each run's size, font, bold, italic and colour
+  from its paragraph style; the document's default text size (`\defchp`); the paragraph
+  mark's size, which sets an empty line's height (read too); the table's position (`\trleft`,
+  read too); the page's vertical alignment (`\vertalc`…, read too); and each section's
+  headers and footers. A table style's "header row" look no longer makes RTF and ODT copies
+  repeat and bold the first row on every page.

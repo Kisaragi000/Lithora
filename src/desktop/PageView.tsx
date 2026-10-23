@@ -110,6 +110,14 @@ interface ObjectDrag {
   dy: number;
 }
 
+/** Where each open document was scrolled to, so switching tabs comes back to the same place. */
+const savedScroll = new Map<number, { top: number; left: number }>();
+
+/** Forget a closed document's scroll position. */
+export function forgetScroll(id: number) {
+  savedScroll.delete(id);
+}
+
 export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageView(
   { doc, zoom, onState, onError, onShortcut, onCurrentPage, onContextMenu, readOnly },
   ref,
@@ -625,6 +633,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   const reportPage = useCallback(() => {
     const root = scroller.current;
     if (!root) return;
+    savedScroll.set(id, { top: root.scrollTop, left: root.scrollLeft });
     const line = root.scrollTop + root.clientHeight / 3;
     const pages = root.querySelectorAll<HTMLElement>('[data-page]');
     let current = 0;
@@ -632,7 +641,19 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
       if (el.offsetTop <= line) current = i;
     });
     onCurrentPage(current);
-  }, [onCurrentPage]);
+  }, [id, onCurrentPage]);
+
+  // Coming back to a tab puts the view where it was left.
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    const saved = savedScroll.get(id);
+    if (root && saved) {
+      root.scrollTop = saved.top;
+      root.scrollLeft = saved.left;
+    }
+    // Only when the view first shows this document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   useEffect(() => {
     reportPage();

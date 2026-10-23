@@ -2,6 +2,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  FoldVertical,
   AlignCenter,
   AlignJustify,
   AlignLeft,
@@ -704,6 +707,44 @@ export const Ribbon = React.memo(function Ribbon({
             <Btn title={t.justify} active={doc?.align === 'justify'} disabled={none} onClick={() => onCommand('para.justify')}>
               <AlignJustify className="h-4 w-4" />
             </Btn>
+            <Popover
+              title={t.verticalAlign}
+              disabled={none}
+              label={(() => {
+                const Icon = doc?.valign === 'center' ? FoldVertical : doc?.valign === 'bottom' ? ArrowDownToLine : ArrowUpToLine;
+                return <Icon className="h-4 w-4" />;
+              })()}
+            >
+              {(close) => (
+                <div className="flex gap-1 p-1">
+                  {(
+                    [
+                      ['top', t.vAlignTop, ArrowUpToLine],
+                      ['center', t.vAlignCenter, FoldVertical],
+                      ['bottom', t.vAlignBottom, ArrowDownToLine],
+                    ] as const
+                  ).map(([v, label, Icon]) => (
+                    <Btn
+                      key={v}
+                      title={label}
+                      active={doc?.valign === v}
+                      onClick={() => {
+                        if (doc?.inTable) {
+                          // Keep each cell's left, centre or right; only the up-and-down position changes.
+                          const h = doc.align === 'center' ? 'Center' : doc.align === 'right' ? 'Right' : 'Left';
+                          onCommand('table.cellAlign', { value: v === 'center' && h === 'Center' ? 'center' : `${v}${h}` });
+                        } else {
+                          onCommand('layout.verticalAlign', { value: v });
+                        }
+                        close();
+                      }}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </Btn>
+                  ))}
+                </div>
+              )}
+            </Popover>
             <Divider />
             <Btn title={t.bullets} disabled={none} onClick={() => onCommand('para.bullets')}>
               <List className="h-4 w-4" />

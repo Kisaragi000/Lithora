@@ -46,6 +46,8 @@ export interface DocState {
   /** Where the cursor is: body, header, footer, textBox, note or comment. */
   story: string;
   inTable: boolean;
+  /** Vertical alignment: the table cell's in a table, otherwise the page's. */
+  valign: 'top' | 'center' | 'justify' | 'bottom';
   trackChanges: boolean;
   /** The selected picture or shape's frame. */
   object: Mark | null;
@@ -170,6 +172,8 @@ export const engine = {
   create: (name: string) => invoke<DocState>('engine_new', { name }),
   close: (doc: number) => invoke<void>('engine_close', { doc }),
   state: (doc: number) => invoke<DocState>('engine_state', { doc }),
+  /** Show document `doc` in a window of its own at screen point (x, y), logical pixels. */
+  openDocWindow: (doc: number, title: string, x: number, y: number) => invoke<void>('open_doc_window', { doc, title, x, y }),
   type: (doc: number, text: string) => invoke<DocState>('engine_type', { doc, text }),
   key: (doc: number, key: string) => invoke<DocState | null>('engine_key', { doc, key }),
   click: (doc: number, page: number, x: number, y: number, extend: boolean) =>
