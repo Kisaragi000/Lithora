@@ -213,6 +213,19 @@ const en = {
   caseUpper: 'UPPERCASE',
   caseTitle: 'Capitalize Each Word',
   caseToggle: 'tOGGLE cASE',
+  signatureNotice: 'A drawn signature is a picture. It is not a certified digital signature and does not by itself prove who signed. Check what the recipient accepts.',
+  about: 'About Lithora',
+  aboutVersion: 'Version {version}',
+  aboutLicense: 'Free and open source software under the MIT or Apache-2.0 license. Copyright (c) 2026 Kisaragi and the Lithora contributors.',
+  aboutWarrantyTitle: 'No warranty',
+  aboutWarranty: 'Lithora is provided "as is", without warranty of any kind, and its authors are not liable for any damages arising from its use, as set out in its licenses. Keep backup copies of important documents, and check documents converted from other formats before relying on them.',
+  aboutSignatureTitle: 'Signatures',
+  aboutPrivacyTitle: 'Privacy',
+  aboutPrivacy: 'Lithora has no accounts, no ads and no tracking, and collects no data about you or your documents. Your documents stay on your computer. Lithora goes online only to check GitHub for a new version and to download it when you choose to update; you can turn the check off in Settings.',
+  aboutTrademarksTitle: 'Trademarks',
+  aboutTrademarks: 'Microsoft, Word and Windows are trademarks of the Microsoft group of companies. Lithora is an independent project and is not affiliated with, sponsored by or endorsed by Microsoft. Other names belong to their owners.',
+  aboutNotices: 'Third-party software',
+  aboutNoticesHint: 'Lithora includes open source software by others. Their full license texts are in the third-party folder installed with Lithora.',
 };
 
 type MoreStrings = typeof en;
@@ -429,6 +442,19 @@ const ru: MoreStrings = {
   caseUpper: 'ВСЕ ПРОПИСНЫЕ',
   caseTitle: 'Начинать С Прописных',
   caseToggle: 'иЗМЕНИТЬ рЕГИСТР',
+  signatureNotice: 'Нарисованная подпись — это картинка. Это не квалифицированная электронная подпись, и сама по себе она не доказывает, кто подписал документ. Уточните, что принимает получатель.',
+  about: 'О программе Lithora',
+  aboutVersion: 'Версия {version}',
+  aboutLicense: 'Свободная программа с открытым исходным кодом по лицензии MIT или Apache-2.0. Copyright (c) 2026 Kisaragi и участники проекта Lithora.',
+  aboutWarrantyTitle: 'Без гарантий',
+  aboutWarranty: 'Lithora предоставляется «как есть», без каких-либо гарантий, и её авторы не несут ответственности за ущерб от её использования, как указано в лицензиях. Храните резервные копии важных документов и проверяйте документы, преобразованные из других форматов, прежде чем на них полагаться.',
+  aboutSignatureTitle: 'Подписи',
+  aboutPrivacyTitle: 'Конфиденциальность',
+  aboutPrivacy: 'В Lithora нет учётных записей, рекламы и слежки, и она не собирает данных о вас и ваших документах. Документы остаются на вашем компьютере. Lithora выходит в интернет, только чтобы проверить на GitHub, есть ли новая версия, и скачать её, когда вы решите обновиться; проверку можно отключить в настройках.',
+  aboutTrademarksTitle: 'Товарные знаки',
+  aboutTrademarks: 'Microsoft, Word и Windows — товарные знаки группы компаний Microsoft. Lithora — независимый проект, не связанный с Microsoft и не одобренный ею. Другие названия принадлежат их владельцам.',
+  aboutNotices: 'Сторонние программы',
+  aboutNoticesHint: 'Lithora содержит программы с открытым исходным кодом других авторов. Полные тексты их лицензий лежат в папке third-party, установленной вместе с Lithora.',
 };
 
 const hy: MoreStrings = {
@@ -643,6 +669,19 @@ const hy: MoreStrings = {
   caseUpper: 'ԲՈԼՈՐԸ ՄԵԾԱՏԱՌ',
   caseTitle: 'Յուրաքանչյուր Բառ Մեծատառով',
   caseToggle: 'փՈԽԵԼ ՏԱՌԵՐԸ',
+  signatureNotice: 'Նկարված ստորագրությունը պատկեր է։ Այն հավաստագրված թվային ստորագրություն չէ և ինքնին չի ապացուցում, թե ով է ստորագրել։ Ճշտեք, թե ինչ է ընդունում ստացողը։',
+  about: 'Lithora-ի մասին',
+  aboutVersion: 'Տարբերակ {version}',
+  aboutLicense: 'Ազատ և բաց կոդով ծրագիր՝ MIT կամ Apache-2.0 լիցենզիայով։ Copyright (c) 2026 Kisaragi և Lithora-ի մասնակիցներ։',
+  aboutWarrantyTitle: 'Առանց երաշխիքի',
+  aboutWarranty: 'Lithora-ն տրամադրվում է «ինչպես կա», առանց որևէ երաշխիքի, և դրա հեղինակները պատասխանատվություն չեն կրում դրա օգտագործումից առաջացած վնասի համար, ինչպես նշված է լիցենզիաներում։ Պահեք կարևոր փաստաթղթերի պահուստային պատճեններ և ստուգեք այլ ձևաչափերից փոխարկված փաստաթղթերը՝ նախքան դրանց վրա հենվելը։',
+  aboutSignatureTitle: 'Ստորագրություններ',
+  aboutPrivacyTitle: 'Գաղտնիություն',
+  aboutPrivacy: 'Lithora-ում չկան հաշիվներ, գովազդ կամ հետևում, և այն տվյալներ չի հավաքում ձեր կամ ձեր փաստաթղթերի մասին։ Փաստաթղթերը մնում են ձեր համակարգչում։ Lithora-ն համացանց է մտնում միայն GitHub-ում նոր տարբերակ ստուգելու և այն ներբեռնելու համար, երբ դուք որոշեք թարմացնել. ստուգումը կարելի է անջատել Կարգավորումներում։',
+  aboutTrademarksTitle: 'Ապրանքային նշաններ',
+  aboutTrademarks: 'Microsoft-ը, Word-ը և Windows-ը Microsoft ընկերությունների խմբի ապրանքային նշաններ են։ Lithora-ն անկախ նախագիծ է և կապված չէ Microsoft-ի հետ ու հավանություն չի ստացել նրանից։ Այլ անվանումները պատկանում են իրենց սեփականատերերին։',
+  aboutNotices: 'Երրորդ կողմի ծրագրեր',
+  aboutNoticesHint: 'Lithora-ն ներառում է այլ հեղինակների բաց կոդով ծրագրեր։ Նրանց լիցենզիաների ամբողջական տեքստերը Lithora-ի հետ տեղադրված third-party թղթապանակում են։',
 };
 
 export const moreStrings = { en, ru, hy };

@@ -48,6 +48,12 @@ jobs:
       - name: Type check
         run: npm run lint
 
+      - name: Collect third-party licenses
+        shell: bash
+        run: |
+          if python3 --version >/dev/null 2>&1; then py=python3; else py=python; fi
+          "$py" scripts/collect_licenses.py
+
       - name: Build the interface
         run: npm run build
 

@@ -66,11 +66,12 @@ installs and restarts the app.
 
 **Signing and printing**
 - Draw your signature with a mouse, pen or finger, save it, and place it anywhere in a
-  document.
+  document. A drawn signature is a picture, not a certified digital signature, so check what
+  the person or office you send the document to accepts.
 - Print to any installed printer, with copies, page ranges and two-sided printing.
 
 **Peace of mind**
-- A History panel, like Photoshop's: click any earlier step to go back to it.
+- A History panel: click any earlier step to go back to it.
 - AutoRecover keeps a copy of unsaved work and brings it back after a crash.
 - A Recent files list, and the window remembers its size and place.
 
@@ -128,6 +129,13 @@ keep the version number don't publish anything.
 Bug reports, document samples that don't open correctly, translations and pull requests are
 all welcome. Please open an [issue](https://github.com/Kisaragi000/Lithora/issues) to start.
 
+## Privacy
+
+Lithora has no accounts, no ads, no analytics and no tracking. Your documents stay on your
+computer. The only time Lithora goes online is to ask GitHub whether a newer version exists
+(you can turn this off in **Settings**) and to download an update when you choose to install
+it. See [PRIVACY.md](PRIVACY.md).
+
 ## License
 
 Lithora is free and open source software, licensed under either of
@@ -137,6 +145,19 @@ Lithora is free and open source software, licensed under either of
 
 at your option. Unless you say otherwise, any contribution you submit for inclusion in
 Lithora is dual licensed in the same way, without any additional terms or conditions.
+
+## No warranty
+
+Lithora is provided "as is", without warranty of any kind, and its authors are not liable for
+any damages arising from its use. The full terms are in [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE). Keep backup copies of important documents, and check
+documents converted from other formats before relying on them.
+
+## Trademarks
+
+Microsoft, Word and Windows are trademarks of the Microsoft group of companies. Lithora is an
+independent project and is not affiliated with, sponsored by or endorsed by Microsoft. Names of
+other products are used only to describe the file formats Lithora opens and saves.
 
 ## Credits
 
