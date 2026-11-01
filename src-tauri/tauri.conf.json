@@ -77,7 +77,11 @@
         "installerHooks": "windows/installer-hooks.nsh"
       }
     },
+    "licenseFile": "windows/installer-license.txt",
     "resources": {
+      "../LICENSE-MIT": "LICENSE-MIT",
+      "../LICENSE-APACHE": "LICENSE-APACHE",
+      "../PRIVACY.md": "PRIVACY.md",
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
       "../third-party/": "third-party/",
       "dictionaries/": "dictionaries/"
