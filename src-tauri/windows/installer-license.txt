@@ -1,0 +1,41 @@
+Lithora - free and open source word processor
+Copyright (c) 2026 Kisaragi and the Lithora contributors
+
+Lithora is free software. You may use, copy, change and share it under either the
+MIT License or the Apache License, Version 2.0, at your option. The full texts are
+installed with Lithora (LICENSE-MIT and LICENSE-APACHE) and are at
+https://github.com/Kisaragi000/Lithora.
+
+NO WARRANTY
+
+LITHORA IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH LITHORA OR
+THE USE OR OTHER DEALINGS IN LITHORA.
+
+Keep backup copies of important documents, and check documents converted from other
+formats before relying on them.
+
+SIGNATURES
+
+A signature drawn in Lithora is a picture placed in the document. It is not a
+certified digital signature and does not by itself prove who signed a document.
+
+PRIVACY
+
+Lithora has no accounts, no ads and no tracking, and collects no data about you or
+your documents. It goes online only to check GitHub for a new version (which you can
+turn off in Settings) and to download an update when you choose to install one.
+
+TRADEMARKS
+
+Microsoft, Word and Windows are trademarks of the Microsoft group of companies.
+Lithora is an independent project and is not affiliated with, sponsored by or
+endorsed by Microsoft.
+
+THIRD-PARTY SOFTWARE
+
+Lithora includes open source software by others, each under its own license. See
+THIRD-PARTY-NOTICES.md and the third-party folder installed with Lithora.

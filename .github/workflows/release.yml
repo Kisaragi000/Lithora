@@ -71,6 +71,13 @@ jobs:
 
       - run: npm ci
 
+      # Refresh the bundled license texts of every library built into the app.
+      - name: Collect third-party licenses
+        shell: bash
+        run: |
+          if python3 --version >/dev/null 2>&1; then py=python3; else py=python; fi
+          "$py" scripts/collect_licenses.py
+
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         env:

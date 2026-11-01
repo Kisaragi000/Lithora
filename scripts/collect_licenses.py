@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Write third-party/DEPENDENCY-LICENSES.txt: the license texts of every Rust crate and npm
+package built into Lithora, so they ship inside the installers.
+
+Run from the repository root after `npm ci`:  python3 scripts/collect_licenses.py
+It reads `cargo tree` for the Windows and Linux builds (normal and build dependencies only,
+not dev or test ones) and the non-dev packages of package-lock.json.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TAURI = os.path.join(ROOT, "src-tauri")
+OUT = os.path.join(ROOT, "third-party", "DEPENDENCY-LICENSES.txt")
+TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
+LICENSE_FILE = re.compile(r"^(licen[cs]e|copying|notice|copyright|unlicense|authors)([-_.].*)?$", re.I)
+# Crates whose license texts already ship elsewhere in third-party/.
+COVERED = {
+    "wordcraft": "third-party/wordcraft/",
+    "craft-libs": "third-party/craft-libs/",
+}
+
+
+def run(args, cwd):
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8").stdout
+
+
+def license_files(directory):
+    found = []
+    for name in sorted(os.listdir(directory)):
+        path = os.path.join(directory, name)
+        if os.path.isfile(path) and LICENSE_FILE.match(name):
+            found.append(path)
+        elif os.path.isdir(path) and name.lower() in ("license", "licenses", "licences"):
+            found += [os.path.join(path, f) for f in sorted(os.listdir(path)) if os.path.isfile(os.path.join(path, f))]
+    return found
+
+
+def read(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read().strip()
+
+
+def crates():
+    used = set()
+    for target in TARGETS:
+        tree = run(["cargo", "tree", "--locked", "--target", target, "-e", "normal,build",
+                    "--prefix", "none", "-f", "{p}"], TAURI)
+        for line in tree.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                used.add((parts[0], parts[1].lstrip("v")))
+    meta = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], TAURI))
+    entries = []
+    for p in meta["packages"]:
+        if (p["name"], p["version"]) not in used or p["source"] is None:
+            continue  # not built into Lithora, or Lithora's own code (vendor/ crates are in NOTICES)
+        covered = next((v for k, v in COVERED.items() if k in p["source"]), None)
+        if p["name"].startswith("harper-"):
+            covered = "third-party/harper/"
+        directory = os.path.dirname(p["manifest_path"])
+        entries.append({
+            "name": p["name"], "version": p["version"], "license": p.get("license") or "see files",
+            "url": p.get("repository") or f"https://crates.io/crates/{p['name']}",
+            "files": [] if covered else license_files(directory), "covered": covered,
+        })
+    return sorted(entries, key=lambda e: (e["name"], e["version"]))
+
+
+def npm_packages():
+    lock = json.load(open(os.path.join(ROOT, "package-lock.json"), encoding="utf-8"))
+    entries = []
+    for path, info in lock["packages"].items():
+        if not path or info.get("dev") or info.get("optional") and not os.path.isdir(os.path.join(ROOT, path)):
+            continue
+        directory = os.path.join(ROOT, path)
+        name = path.split("node_modules/")[-1]
+        entries.append({
+            "name": name, "version": info.get("version", ""), "license": info.get("license", "see files"),
+            "url": f"https://www.npmjs.com/package/{name}",
+            "files": license_files(directory) if os.path.isdir(directory) else [], "covered": None,
+        })
+    return sorted(entries, key=lambda e: e["name"])
+
+
+def section(title, entries, seen):
+    """seen maps a license text to the package that first printed it, so each text appears once."""
+    out = [f"{'=' * 78}\n{title}\n{'=' * 78}\n"]
+    for e in entries:
+        out.append(f"\n{'-' * 78}\n{e['name']} {e['version']}  ({e['license']})\n{e['url']}\n{'-' * 78}\n")
+        if e["covered"]:
+            out.append(f"License texts: see {e['covered']}\n")
+        elif not e["files"]:
+            out.append(f"This package is under {e['license']} and ships no separate license file; "
+                       "the standard text of that license applies (see the end of this file).\n")
+        for f in e["files"]:
+            text = read(f)
+            key = re.sub(r"\s+", " ", text)
+            if key in seen:
+                out.append(f"\n[{os.path.basename(f)}] Same text as {seen[key]}.\n")
+            else:
+                seen[key] = f"{e['name']} {e['version']} ({os.path.basename(f)})"
+                out.append(f"\n[{os.path.basename(f)}]\n\n{text}\n")
+    return "".join(out)
+
+
+def main():
+    rust, npm = crates(), npm_packages()
+    seen = {}
+    head = (
+        "Lithora - licenses of the third-party libraries built into the app\n\n"
+        "Generated by scripts/collect_licenses.py. Each library keeps its own license.\n"
+        "Libraries under the Mozilla Public License 2.0 are used unmodified; their source code\n"
+        "is available from crates.io at the address given for each one.\n\n"
+        f"Rust crates: {len(rust)}    npm packages: {len(npm)}\n\n"
+    )
+    tail = (
+        f"\n{'=' * 78}\nStandard license texts\n{'=' * 78}\n\n"
+        "[Apache License 2.0]\n\n" + read(os.path.join(ROOT, "LICENSE-APACHE")) + "\n\n"
+        "[MIT License]\n\n" + read(os.path.join(ROOT, "LICENSE-MIT")).replace(
+            "Copyright (c) 2026 Kisaragi and the Lithora contributors", "Copyright (c) <year> <copyright holders>") + "\n\n"
+        "[Mozilla Public License 2.0]\n\nThe full text is printed above, with the first crate under MPL-2.0 "
+        "that ships it.\n"
+    )
+    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
+        f.write(head + section("Rust crates", rust, seen) + "\n" + section("npm packages", npm, seen) + tail)
+    missing = [e["name"] for e in rust + npm if not e["files"] and not e["covered"]]
+    print(f"wrote {os.path.relpath(OUT, ROOT)}: {len(rust)} crates, {len(npm)} npm packages; "
+          f"{len(missing)} without their own license file")
+    if missing:
+        print("  " + ", ".join(missing))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

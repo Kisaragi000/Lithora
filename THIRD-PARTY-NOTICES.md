@@ -37,20 +37,21 @@ Proofread checks English grammar and style with `harper-core`, the engine of Har
 Licensed under the Apache License, Version 2.0; see
 [third-party/harper/LICENSE-APACHE](third-party/harper/LICENSE-APACHE). It runs inside Lithora,
 offline. The English Thesaurus (Review › Thesaurus) uses Harper's word list, `harper-thesaurus`,
-under the same license.
+under the same license (its synonym list is based on the public-domain Moby Thesaurus).
 
 ## Armenian spelling dictionary (HySpell)
 
 `src-tauri/dictionaries/hy_AM.aff` and `hy_AM.dic` are the Reformed-orthography Hunspell
 dictionary of HySpell 3.0.1 (https://github.com/hyspell/HySpell_3.0.1, files `hy-r.aff` and
-`hy-r.dic`, renamed; Lithora added the word "տեքստ", which it lacked). Copyright (c) 2017 hyspell.com, author Haro Mherian. MIT License; the full
+`hy-r.dic`, renamed; modified by Lithora, which added the word "տեքստ"). Copyright (c) 2017 hyspell.com, author Haro Mherian. MIT License; the full
 notice is in [src-tauri/dictionaries/LICENSE-hy_AM.txt](src-tauri/dictionaries/LICENSE-hy_AM.txt).
 
 ## Russian spelling dictionary
 
 `src-tauri/dictionaries/ru_RU.aff` and `ru_RU.dic` come from the LibreOffice dictionaries
 (https://github.com/LibreOffice/dictionaries, `ru_RU`). Copyright (c) 1997-2008 Alexander I.
-Lebedev, with changes by Laszlo Nemeth. BSD-style license; the full notice is in
+Lebedev, with changes by Laszlo Nemeth. Lithora ships the files unmodified. BSD-style license;
+the full notice is in
 [src-tauri/dictionaries/LICENSE-ru_RU.txt](src-tauri/dictionaries/LICENSE-ru_RU.txt).
 
 ## Interface fonts
@@ -63,6 +64,22 @@ whose LICENSE files hold the full license text.
 
 ## Rust and JavaScript libraries
 
-Lithora's other dependencies (Tauri, React and the crates and npm packages listed in
-`src-tauri/Cargo.lock` and `package-lock.json`) are under permissive licenses such as MIT,
-Apache-2.0 and BSD.
+Lithora is also built from about 670 Rust crates (including Tauri and the krilla PDF library)
+and a few npm packages (including React, Tauri's JavaScript API and the Lucide icons). Their
+names, versions, licenses and full license texts are listed in
+[third-party/DEPENDENCY-LICENSES.txt](third-party/DEPENDENCY-LICENSES.txt), which ships inside
+every installer. Run `python3 scripts/collect_licenses.py` to refresh it; the release workflow
+does this before each build.
+
+Most are under MIT, Apache-2.0, BSD, ISC, Zlib or Unicode licenses. A few crates
+(`cssparser`, `cssparser-macros`, `selectors`, `dtoa-short`, `option-ext`, `colored`) are under the
+Mozilla Public License 2.0. Lithora uses them unmodified, and their source code is available
+from crates.io (https://crates.io) under the same names and versions. The `webpki-roots` and
+`webpki-root-certs` crates carry data under the Community Data License Agreement Permissive 2.0.
+
+## Trademarks
+
+Microsoft, Word and Windows are trademarks of the Microsoft group of companies. Lithora is an
+independent project and is not affiliated with, sponsored by or endorsed by Microsoft. Other
+product names mentioned are the property of their owners and are used only to describe the
+file formats Lithora works with.

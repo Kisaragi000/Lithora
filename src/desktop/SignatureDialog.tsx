@@ -299,6 +299,7 @@ export function SignatureDialog({
           <Eraser className="h-4 w-4" /> {t.signatureClear}
         </SecondaryButton>
       </div>
+      <p className="mt-3 rounded-md bg-[#FBF8F0] px-2.5 py-2 text-[12px] leading-snug text-slate-600">{t.signatureNotice}</p>
       <h3 className="mb-1.5 mt-4 font-medium text-slate-800">{t.signatureSaved}</h3>
       {saved.length === 0 ? (
         <p className="text-slate-500">{t.signatureNone}</p>
