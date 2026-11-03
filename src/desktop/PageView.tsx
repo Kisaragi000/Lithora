@@ -636,7 +636,13 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
       return;
     }
     dragging.current = true;
-    run(() => engine.click(id, page, x, y, e.shiftKey), false);
+    run(async () => {
+      const next = await engine.click(id, page, x, y, e.shiftKey);
+      // A click on the part of a table row carried onto this page, where the cell's text is on
+      // the page before: the cursor goes to that text, so bring it into view.
+      if (next.cursor && next.cursor.page !== page) followCursor.current = true;
+      return next;
+    }, false);
   };
 
   const onPageMouseMove = (e: React.MouseEvent<HTMLElement>, page: number) => {

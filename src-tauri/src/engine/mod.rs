@@ -1200,6 +1200,43 @@ mod tests {
         run(s, "file.printPdf", json!({ "path": format!("{out}/export.pdf") })).unwrap();
     }
 
+    /// Click the middle of every table cell of a file: LITHORA_FILE=doc cargo test --lib
+    /// every_cell_of_a_file -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn every_cell_of_a_file_takes_a_click() {
+        use wordcraft_engine::layout::Placed;
+        let Ok(file) = std::env::var("LITHORA_FILE") else { return };
+        let (doc, _) =
+            wordcraft_engine::io::open_path_in(std::path::Path::new(&file), None, &Region::default())
+                .unwrap();
+        let mut s = Session::new(doc);
+        let layout = s.layout();
+        let (mut ok, mut bad) = (0, 0);
+        for (pi, p) in layout.pages.iter().enumerate() {
+            for it in &p.items {
+                if let Placed::Cell { rect, covered: false, table, row, cell, .. } = it {
+                    let mut want = table.0.clone();
+                    want.push(*row as u32);
+                    want.push(*cell as u32);
+                    for (fx, fy) in [(0.5, 0.5), (0.9, 0.9), (0.1, 0.2)] {
+                        let (x, y) = (rect.x + rect.w * fx, rect.y + rect.h * fy);
+                        click_at(&mut s, pi, x, y, false).unwrap();
+                        let got = &s.sel.focus.path.0;
+                        if got.starts_with(&want) {
+                            ok += 1;
+                        } else {
+                            bad += 1;
+                            println!("page {pi} cell {want:?} at ({x:.0},{y:.0}) -> {got:?} story {:?}", s.sel.focus.story);
+                        }
+                    }
+                }
+            }
+        }
+        println!("{ok} ok, {bad} missed");
+        assert_eq!(bad, 0);
+    }
+
     #[test]
     fn a_click_on_the_part_of_a_row_carried_to_the_next_page_lands_in_its_cell() {
         use wordcraft_engine::layout::Placed;
