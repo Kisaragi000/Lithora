@@ -9,7 +9,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { writeHtml, writeText } from '@tauri-apps/plugin-clipboard-manager';
-import { DocState, engine } from './engine';
+import { DocState, TableSpot, engine } from './engine';
 
 const POINTS_PER_INCH = 72;
 const CSS_DPI = 96;
@@ -69,6 +69,8 @@ export interface PageViewHandle {
   viewport(): { width: number; height: number };
   /** Put pictures (files) on the page at a point in the window, as dropped there. */
   dropPictures(paths: string[], clientX: number, clientY: number): Promise<void>;
+  /** Scroll the selection to the middle of the screen and make it flash (a found mistake). */
+  reveal(): void;
 }
 
 interface PageViewProps {
@@ -97,6 +99,30 @@ function fileBase64(file: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+/** Mouse pointers for a table's selection areas: an arrow down over a column, right over a row. */
+const arrowCursor = (path: string, hx: number, hy: number) =>
+  `url("data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><path d='${path}' fill='black' stroke='white' stroke-width='1'/></svg>`,
+  )}") ${hx} ${hy}, pointer`;
+const TABLE_CURSORS: Record<TableSpot['kind'], string> = {
+  column: 'col-resize',
+  row: 'row-resize',
+  corner: 'nwse-resize',
+  selectColumn: arrowCursor('M5 1h6v8h4l-7 6.5L1 9h4z', 8, 15),
+  selectRow: arrowCursor('M1 5v6h8v4l6.5-7L9 1v4z', 15, 8),
+  selectTable: 'move',
+};
+
+/** A drag on a table border (resizing) or selection area (selecting rows or columns). */
+interface TableDrag {
+  spot: TableSpot;
+  page: number;
+  x: number;
+  y: number;
+  toX: number;
+  toY: number;
 }
 
 /** Which corner of a picture's frame is being dragged. */
@@ -145,6 +171,23 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   const dragging = useRef(false);
   const composing = useRef(false);
   const followCursor = useRef(false);
+  // reveal(): the selection scrolls to the middle of the screen and flashes.
+  const [revealTick, setRevealTick] = useState(0);
+  const [flash, setFlash] = useState(0);
+  useEffect(() => {
+    if (revealTick === 0) return;
+    const frame = requestAnimationFrame(() => {
+      const mark = scroller.current?.querySelector('[data-sel-mark]') ?? cursorEl.current;
+      mark?.scrollIntoView({ block: 'center', inline: 'nearest' });
+      setFlash((n) => n + 1);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revealTick]);
+  useEffect(() => {
+    if (flash === 0) return;
+    const timer = setTimeout(() => setFlash(0), 1600);
+    return () => clearTimeout(timer);
+  }, [flash]);
 
   // Which pages are on screen, which bitmaps are out of date, and the scale each canvas holds
   // the engine's last drawing of its page at (so the engine can send only what changed).
@@ -313,10 +356,11 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     [enqueue, onError, settle],
   );
 
-  // Keep the cursor on screen after typing and moving with the keyboard.
+  // Keep the cursor (or, with no cursor, the selection) on screen after typing and moving.
   useEffect(() => {
     if (followCursor.current) {
-      cursorEl.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const mark = cursorEl.current ?? scroller.current?.querySelector('[data-sel-mark]');
+      mark?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       followCursor.current = false;
     }
     setPaintTick((t) => t + 1);
@@ -419,7 +463,9 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     [focus, id, pxPerPt, run],
   );
 
-  useImperativeHandle(ref, () => ({ command, commands, edit, copy, cut, focus, viewport, dropPictures }), [
+  const reveal = useCallback(() => setRevealTick((t) => t + 1), []);
+
+  useImperativeHandle(ref, () => ({ command, commands, edit, copy, cut, focus, viewport, dropPictures, reveal }), [
     command,
     commands,
     edit,
@@ -428,6 +474,7 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     focus,
     viewport,
     dropPictures,
+    reveal,
   ]);
 
   // Start typing straight away in a newly shown document.
@@ -517,6 +564,33 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     return { x: (e.clientX - box.left) / pxPerPt, y: (e.clientY - box.top) / pxPerPt };
   };
 
+  // Tables: what is under the pointer (a border to drag, a row or column to select).
+  const [hoverSpot, setHoverSpot] = useState<{ page: number; spot: TableSpot } | null>(null);
+  const hoverRef = useRef(hoverSpot);
+  hoverRef.current = hoverSpot;
+  const spotAsk = useRef<{ busy: boolean; next: { page: number; x: number; y: number } | null }>({ busy: false, next: null });
+  const askSpot = useCallback(
+    (page: number, x: number, y: number) => {
+      const a = spotAsk.current;
+      a.next = { page, x, y };
+      if (a.busy) return;
+      a.busy = true;
+      void (async () => {
+        while (a.next) {
+          const at = a.next;
+          a.next = null;
+          const spot = await engine.tableSpot(id, at.page, at.x, at.y).catch(() => null);
+          setHoverSpot(spot ? { page: at.page, spot } : null);
+        }
+        a.busy = false;
+      })();
+    },
+    [id],
+  );
+  const [tableDrag, setTableDrag] = useState<TableDrag | null>(null);
+  const tableDragRef = useRef(tableDrag);
+  tableDragRef.current = tableDrag;
+
   const onPageMouseDown = (e: React.MouseEvent<HTMLElement>, page: number) => {
     if (e.button === 2) {
       // Right click: the cursor moves there first, unless it is on the selection.
@@ -535,6 +609,20 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
     e.preventDefault();
     focus();
     const { x, y } = pointOnPage(e);
+    const hover = hoverRef.current?.page === page ? hoverRef.current.spot : null;
+    if (hover && !readOnly) {
+      if (e.detail === 2 && hover.kind === 'column') {
+        // Double click on a column border: the column fits its contents.
+        setTableDrag(null);
+        run(async () => (await engine.command(id, 'table.fitColumn', { page, x, y })).state);
+        return;
+      }
+      if (hover.kind === 'selectColumn' || hover.kind === 'selectRow' || hover.kind === 'selectTable') {
+        run(async () => (await engine.command(id, 'table.selectAt', { page, x, y })).state, false);
+      }
+      setTableDrag({ spot: hover, page, x, y, toX: x, toY: y });
+      return;
+    }
     if (e.detail === 2) {
       // Double click: the word, or into (and out of) the header and footer.
       run(() => engine.doubleClick(id, page, x, y), false);
@@ -552,11 +640,66 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
   };
 
   const onPageMouseMove = (e: React.MouseEvent<HTMLElement>, page: number) => {
-    // Drag to select; skip moves while the engine is still busy with the last one.
-    if (!dragging.current || (e.buttons & 1) === 0 || pending.current > 0) return;
     const { x, y } = pointOnPage(e);
+    if (tableDragRef.current) return;
+    if (!dragging.current || (e.buttons & 1) === 0) {
+      if (e.buttons === 0) askSpot(page, x, y);
+      return;
+    }
+    // Drag to select; skip moves while the engine is still busy with the last one.
+    if (pending.current > 0) return;
     run(() => engine.click(id, page, x, y, true), false);
   };
+
+  // A drag on a table: a border follows the pointer and the table resizes when it is let go;
+  // across the selection areas, every row or column on the way is selected.
+  useEffect(() => {
+    if (!tableDrag) return;
+    const pageEl = column.current?.querySelector(`[data-page="${tableDrag.page}"]`) as HTMLElement | null;
+    const at = (e: MouseEvent) => {
+      const box = pageEl?.getBoundingClientRect();
+      return box ? { x: (e.clientX - box.left) / pxPerPt, y: (e.clientY - box.top) / pxPerPt } : null;
+    };
+    const move = (e: MouseEvent) => {
+      const d = tableDragRef.current;
+      const p = at(e);
+      if (!d || !p) return;
+      setTableDrag({ ...d, toX: p.x, toY: p.y });
+      if (d.spot.kind.startsWith('select') && d.spot.kind !== 'selectTable' && pending.current === 0) {
+        run(async () => (await engine.command(id, 'table.selectAt', { page: d.page, x: d.x, y: d.y, toX: p.x, toY: p.y })).state, false);
+      }
+    };
+    const up = (e: MouseEvent) => {
+      const d = tableDragRef.current;
+      setTableDrag(null);
+      const p = at(e);
+      if (!d || !p) return;
+      const moved = Math.abs(p.x - d.x) >= 0.5 || Math.abs(p.y - d.y) >= 0.5;
+      if (moved && (d.spot.kind === 'column' || d.spot.kind === 'row' || d.spot.kind === 'corner')) {
+        run(async () =>
+          (
+            await engine.command(id, 'table.resizeDrag', {
+              page: d.page,
+              x: d.x,
+              y: d.y,
+              toX: p.x,
+              toY: p.y,
+              shift: e.shiftKey,
+              ctrl: e.ctrlKey,
+            })
+          ).state,
+        );
+      }
+      setHoverSpot(null);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableDrag !== null, id, pxPerPt, run]);
 
   useEffect(() => {
     const stop = () => {
@@ -678,9 +821,17 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
             key={i}
             data-page={i}
             className="relative shrink-0 bg-white shadow-[0_1px_3px_rgba(8,59,105,0.18),0_4px_14px_rgba(8,59,105,0.08)]"
-            style={{ width: page.width * pxPerPt, height: page.height * pxPerPt }}
+            style={{
+              width: page.width * pxPerPt,
+              height: page.height * pxPerPt,
+              cursor: (() => {
+                const spot = tableDrag?.page === i ? tableDrag.spot : hoverSpot?.page === i && !readOnly ? hoverSpot.spot : null;
+                return spot ? TABLE_CURSORS[spot.kind] : 'text';
+              })(),
+            }}
             onMouseDown={(e) => onPageMouseDown(e, i)}
             onMouseMove={(e) => onPageMouseMove(e, i)}
+            onMouseLeave={() => setHoverSpot(null)}
             onContextMenu={(e) => {
               e.preventDefault();
               // Wait for the click to reach the engine, so the menu sees the new cursor.
@@ -700,11 +851,23 @@ export const PageView = forwardRef<PageViewHandle, PageViewProps>(function PageV
               .filter((r) => r.page === i)
               .map((r, j) => (
                 <div
-                  key={j}
-                  className="pointer-events-none absolute bg-[#6C9FCB]/35"
+                  key={flash > 0 ? `f${flash}-${j}` : j}
+                  data-sel-mark=""
+                  className={`pointer-events-none absolute bg-[#6C9FCB]/35 ${flash > 0 ? 'lithora-flash' : ''}`}
                   style={{ left: r.x * pxPerPt, top: r.y * pxPerPt, width: r.width * pxPerPt, height: r.height * pxPerPt }}
                 />
               ))}
+            {tableDrag?.page === i && (tableDrag.spot.kind === 'column' || tableDrag.spot.kind === 'row') && (
+              // The border's new place while it is dragged.
+              <div
+                className="pointer-events-none absolute border-[#376FA3]"
+                style={
+                  tableDrag.spot.kind === 'column'
+                    ? { left: (tableDrag.spot.x0 + tableDrag.toX - tableDrag.x) * pxPerPt, top: tableDrag.spot.y0 * pxPerPt, height: (tableDrag.spot.y1 - tableDrag.spot.y0) * pxPerPt, borderLeftWidth: 1, borderStyle: 'dashed' }
+                    : { top: (tableDrag.spot.y0 + tableDrag.toY - tableDrag.y) * pxPerPt, left: tableDrag.spot.x0 * pxPerPt, width: (tableDrag.spot.x1 - tableDrag.spot.x0) * pxPerPt, borderTopWidth: 1, borderStyle: 'dashed' }
+                }
+              />
+            )}
             {object?.page === i && (
               <ObjectFrame
                 o={object}

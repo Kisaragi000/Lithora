@@ -151,6 +151,15 @@ interface CommandReply {
   result: unknown;
 }
 
+/** A table border or selection area under the pointer (page points). */
+export interface TableSpot {
+  kind: 'column' | 'row' | 'corner' | 'selectColumn' | 'selectRow' | 'selectTable';
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export const engine = {
   open: (path: string, password?: string) => invoke<DocState>('engine_open', { path, password: password ?? null }),
   newFromTemplate: (path: string, name: string) => invoke<DocState>('engine_new_from_template', { path, name }),
@@ -181,6 +190,9 @@ export const engine = {
   command: (doc: number, command: string, params?: Record<string, unknown>) =>
     invoke<CommandReply>('engine_command', { doc, command, params: params ?? null }),
   save: (doc: number, path?: string) => invoke<DocState>('engine_save', { doc, path: path ?? null }),
+  /** What a table has under a point: a border to drag, or a place that selects a row or column. */
+  tableSpot: (doc: number, page: number, x: number, y: number) =>
+    invoke<TableSpot | null>('engine_table_spot', { doc, page, x, y }),
   doubleClick: (doc: number, page: number, x: number, y: number) => invoke<DocState>('engine_double_click', { doc, page, x, y }),
   fonts: (doc: number) => invoke<string[]>('engine_fonts', { doc }),
   printers: () => invoke<Printer[]>('print_printers'),

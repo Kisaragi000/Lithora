@@ -45,6 +45,7 @@ pub fn run() {
             engine::engine_type,
             engine::engine_key,
             engine::engine_click,
+            engine::engine_table_spot,
             engine::engine_double_click,
             engine::engine_command,
             engine::engine_save,

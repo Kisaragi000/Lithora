@@ -4730,7 +4730,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "lithora"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -10278,10 +10278,8 @@ dependencies = [
 [[package]]
 name = "wordcraft-layout"
 version = "0.9.0"
-source = "git+https://github.com/storytold/wordcraft?rev=00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d#00bc6a4b028013b2dfb0e85e8b326aeed3ecff6d"
 dependencies = [
  "image",
- "js-sys",
  "kurbo",
  "log",
  "serde",
