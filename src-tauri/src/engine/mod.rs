@@ -768,21 +768,46 @@ pub(crate) fn cell_hit(
         }
     }
     let cell = cell?;
+    let in_cell = |l: &&wordcraft_engine::layout::hit::LineHit| {
+        l.path.0.len() > cell.len() && l.path.0.starts_with(&cell)
+    };
     let lines = wordcraft_engine::layout::hit::page_lines(p, story);
     let gap = |v: f32, lo: f32, hi: f32| (lo - v).max(v - hi).max(0.0);
-    let best = lines
-        .iter()
-        .filter(|l| l.path.0.len() > cell.len() && l.path.0.starts_with(&cell))
-        .min_by(|a, b| {
-            gap(y, a.top, a.bottom)
-                .total_cmp(&gap(y, b.top, b.bottom))
-                .then(gap(x, a.left, a.right).total_cmp(&gap(x, b.left, b.right)))
-        })?;
-    Some(Pos {
-        story: best.story,
-        path: best.path.clone(),
-        off: best.para.off_at_x(best.li, x - best.x),
-    })
+    if let Some(best) = lines.iter().filter(in_cell).min_by(|a, b| {
+        gap(y, a.top, a.bottom)
+            .total_cmp(&gap(y, b.top, b.bottom))
+            .then(gap(x, a.left, a.right).total_cmp(&gap(x, b.left, b.right)))
+    }) {
+        return Some(Pos {
+            story: best.story,
+            path: best.path.clone(),
+            off: best.para.off_at_x(best.li, x - best.x),
+        });
+    }
+    // A row split across pages: this part of the cell is empty because its text is on another
+    // page. The cursor goes to the end of the text before (or the start of the text after).
+    let end_of = |l: &wordcraft_engine::layout::hit::LineHit| Pos {
+        story: l.story,
+        path: l.path.clone(),
+        off: l.para.off_at_x(l.li, l.right - l.x + 1.0),
+    };
+    for q in (0..page).rev() {
+        let lines = wordcraft_engine::layout::hit::page_lines(&layout.pages[q], story);
+        if let Some(l) = lines.iter().filter(in_cell).last() {
+            return Some(end_of(l));
+        }
+    }
+    for q in page + 1..layout.pages.len() {
+        let lines = wordcraft_engine::layout::hit::page_lines(&layout.pages[q], story);
+        if let Some(l) = lines.iter().find(|l| in_cell(l)) {
+            return Some(Pos {
+                story: l.story,
+                path: l.path.clone(),
+                off: l.para.off_at_x(l.li, l.left - l.x - 1.0),
+            });
+        }
+    }
+    None
 }
 
 /// What a table has under the pointer, so the page can show the right mouse pointer and a
@@ -1173,6 +1198,36 @@ mod tests {
         }
         let s = docs.sessions.get_mut(&1).unwrap();
         run(s, "file.printPdf", json!({ "path": format!("{out}/export.pdf") })).unwrap();
+    }
+
+    #[test]
+    fn a_click_on_the_part_of_a_row_carried_to_the_next_page_lands_in_its_cell() {
+        use wordcraft_engine::layout::Placed;
+        // A tall first cell that runs onto page 2, beside a short "P" and an empty cell.
+        let long = "A line of the steps column. ".repeat(150);
+        let rtf = format!(
+            r"{{\rtf1\ansi\deff0{{\fonttbl{{\f0 Times New Roman;}}}}
+\trowd\cellx3000\cellx6000\cellx9000 {long}\cell P\cell \cell\row
+\pard\par}}"
+        );
+        let mut s = session_for("split.rtf", &rtf);
+        let layout = s.layout();
+        assert!(layout.pages.len() >= 2, "the row runs onto a second page");
+        for want in [1usize, 2] {
+            let r = layout.pages[1]
+                .items
+                .iter()
+                .find_map(|it| match it {
+                    Placed::Cell { rect, cell, .. } if *cell == want => Some(*rect),
+                    _ => None,
+                })
+                .expect("the row's second part is on page 2");
+            click_at(&mut s, 1, r.x + r.w / 2.0, r.y + r.h / 2.0, false).unwrap();
+            assert_eq!(s.sel.focus.path.0.get(2).copied(), Some(want as u32), "cell {want}");
+            // At the end of the cell's text, so typing adds to it.
+            let len = s.doc.para(s.sel.focus.story, &s.sel.focus.path).map_or(0, |p| p.text.len());
+            assert_eq!(s.sel.focus.off, len, "cell {want}");
+        }
     }
 
     #[test]
