@@ -660,13 +660,14 @@ export const DesktopApp: React.FC = () => {
       setNotice({ text: t.spellingDone });
       return;
     }
-    // The issue is selected now; open the menu under it.
+    // The issue is selected now: bring it into view, flash it, and open the menu under it.
+    view.current?.reveal();
     setTimeout(() => {
       const d = docsRef.current.find((x) => x.id === doc.id);
       const sel = d?.selection[0];
       const p = sel ? screenPoint(sel.page, sel.x, sel.y + sel.height) : { x: window.innerWidth / 2, y: window.innerHeight / 3 };
       setMenu({ x: p.x, y: p.y + 4, items: [...issueItems(r), { label: t.findNext, onClick: () => void spellingRef.current() }] });
-    }, 30);
+    }, 80);
   };
   const spellingRef = useRef(spelling);
   spellingRef.current = spelling;
@@ -746,7 +747,12 @@ export const DesktopApp: React.FC = () => {
   };
 
   const proofreadActions = {
-    onSelect: (i: ProofIssue) => onCommand('select.range', { anchor: i.start, focus: i.end }),
+    onSelect: (i: ProofIssue) => {
+      view.current
+        ?.command('select.range', { anchor: i.start, focus: i.end })
+        .then(() => view.current?.reveal())
+        .catch((e) => showError(String(e)));
+    },
     onFix: (i: ProofIssue, replacement: string) => {
       if (!active) return;
       const id = active.id;

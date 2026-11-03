@@ -161,7 +161,27 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         .collect();
     let sel = s.sel_ends().clone();
     let hint = s.page_hint;
-    let (cursor, selection) = if sel.is_collapsed() {
+    let mark = |page: usize, x: f32, y: f32, width: f32, height: f32| Mark {
+        page,
+        x,
+        y,
+        width,
+        height,
+    };
+    // Whole table cells (a row, a column, cells dragged across) shade the cells, an empty one
+    // too, as in Word; a column selection each row's piece; text running into a table the
+    // whole cells of the rows it takes.
+    let (cursor, selection) = if let Some(range) = s.cell_range() {
+        let rects = wordcraft_engine::cmd::table_mouse::cell_rects(&layout, &s.doc, range);
+        (None, rects.into_iter().map(|(page, r)| mark(page, r.x, r.y, r.w, r.h)).collect())
+    } else if !sel.is_collapsed() && let Some(segs) = s.column_segments() {
+        let rects = segs
+            .iter()
+            .flat_map(|(a, b)| layout.selection_rects(&s.doc, a, b, hint))
+            .map(|(page, r)| mark(page, r.x, r.y, r.w, r.h))
+            .collect();
+        (None, rects)
+    } else if sel.is_collapsed() {
         let cursor = layout.caret_on(&sel.focus, hint).map(|c| Mark {
             page: c.page,
             x: c.x,
@@ -172,16 +192,9 @@ pub(crate) fn doc_state(id: u32, s: &mut Session) -> DocState {
         (cursor, Vec::new())
     } else {
         let (a, b) = sel.ordered();
-        let rects = layout
-            .selection_rects(&s.doc, &a, &b, hint)
+        let rects = wordcraft_engine::cmd::table_mouse::selection_rects(&layout, &s.doc, &a, &b, hint)
             .into_iter()
-            .map(|(page, r)| Mark {
-                page,
-                x: r.x,
-                y: r.y,
-                width: r.w,
-                height: r.h,
-            })
+            .map(|(page, r)| mark(page, r.x, r.y, r.w, r.h))
             .collect();
         (None, rects)
     };
@@ -657,45 +670,184 @@ pub fn engine_click(
     extend: bool,
 ) -> Result<DocState, String> {
     with_doc(&state, doc, |s| {
-        if extend {
-            let layout = s.layout();
-            let story = s.story();
-            if let Some(pos) = layout.hit(page, x, y, story) {
-                run(s, "caret.set", json!({ "pos": pos, "extend": true }))?;
-            }
-        } else {
-            // A click on a picture or shape selects it.
-            let story = s.sel.focus.story;
-            let layout = s.layout();
-            if let Some(hit) = layout
-                .object_at_in(page, x, y, 3.0, story)
-                .filter(|h| h.text_box.is_none())
-            {
-                let a = hit.pos();
-                let b = Pos {
-                    off: a.off + wordcraft_engine::doc::para::OBJ.len_utf8(),
-                    ..a.clone()
-                };
-                s.page_hint = page;
-                run(s, "select.range", json!({ "anchor": a, "focus": b }))?;
-                return Ok(doc_state(doc, s));
-            }
-            // Like Word, one click moves between the body, footnotes and text boxes (headers and
-            // footers need a double click). A click on blank page while in a note goes back to
-            // the body.
-            let target = match story_kind(s) {
-                "header" | "footer" => story,
-                _ => layout.story_at(page, x, y).unwrap_or(StoryRef::Body),
-            };
-            // A click beside the text (in a margin) is not an error: the cursor stays put.
-            let _ = run(
-                s,
-                "caret.set",
-                json!({ "page": page, "x": x, "y": y, "story": target }),
-            );
-        }
+        click_at(s, page, x, y, extend)?;
         Ok(doc_state(doc, s))
     })
+}
+
+/// What a click (or, with `extend`, a drag) at a point on a page does to the cursor.
+pub(crate) fn click_at(
+    s: &mut Session,
+    page: usize,
+    x: f32,
+    y: f32,
+    extend: bool,
+) -> Result<(), String> {
+    if extend {
+        let layout = s.layout();
+        let story = s.sel.focus.story;
+        if let Some(pos) = cell_hit(&layout, page, x, y, story).or_else(|| layout.hit(page, x, y, story)) {
+            run(s, "caret.set", json!({ "pos": pos, "extend": true }))?;
+        }
+        return Ok(());
+    }
+    // A click on a picture or shape selects it.
+    let story = s.sel.focus.story;
+    let layout = s.layout();
+    if let Some(hit) = layout
+        .object_at_in(page, x, y, 3.0, story)
+        .filter(|h| h.text_box.is_none())
+    {
+        let a = hit.pos();
+        let b = Pos {
+            off: a.off + wordcraft_engine::doc::para::OBJ.len_utf8(),
+            ..a.clone()
+        };
+        s.page_hint = page;
+        run(s, "select.range", json!({ "anchor": a, "focus": b }))?;
+        return Ok(());
+    }
+    // Like Word, one click moves between the body, footnotes and text boxes (headers and
+    // footers need a double click). A click on blank page while in a note goes back to
+    // the body.
+    let target = match story_kind(s) {
+        "header" | "footer" => story,
+        _ => layout.story_at(page, x, y).unwrap_or(StoryRef::Body),
+    };
+    // Anywhere inside a table cell puts the cursor in that cell, like a spreadsheet: not in
+    // whichever cell's text happens to be nearest.
+    if let Some(pos) = cell_hit(&layout, page, x, y, target) {
+        s.page_hint = page;
+        run(s, "caret.set", json!({ "pos": pos }))?;
+        return Ok(());
+    }
+    // A click beside the text (in a margin) is not an error: the cursor stays put.
+    let _ = run(
+        s,
+        "caret.set",
+        json!({ "page": page, "x": x, "y": y, "story": target }),
+    );
+    Ok(())
+}
+
+/// The position in the table cell under (x, y) on `page`, in `story`: the line of the cell
+/// across that height (the first above its text, the last below it), at that x. Of nested
+/// tables the innermost cell wins. None outside cells, or in a cell with no upright text here.
+pub(crate) fn cell_hit(
+    layout: &wordcraft_engine::layout::DocLayout,
+    page: usize,
+    x: f32,
+    y: f32,
+    story: StoryRef,
+) -> Option<Pos> {
+    use wordcraft_engine::layout::Placed;
+    let p = layout.pages.get(page)?;
+    let mut cell: Option<Vec<u32>> = None;
+    for it in p.items.iter().chain(p.header.iter()).chain(p.footer.iter()) {
+        if let Placed::Cell {
+            rect,
+            covered: false,
+            table,
+            row,
+            cell: c,
+            story: s,
+            ..
+        } = it
+            && *s == story
+            && x >= rect.x
+            && x <= rect.x + rect.w
+            && y >= rect.y
+            && y <= rect.y + rect.h
+        {
+            let mut prefix = table.0.clone();
+            prefix.push(*row as u32);
+            prefix.push(*c as u32);
+            if cell.as_ref().is_none_or(|b| prefix.len() > b.len()) {
+                cell = Some(prefix);
+            }
+        }
+    }
+    let cell = cell?;
+    let lines = wordcraft_engine::layout::hit::page_lines(p, story);
+    let gap = |v: f32, lo: f32, hi: f32| (lo - v).max(v - hi).max(0.0);
+    let best = lines
+        .iter()
+        .filter(|l| l.path.0.len() > cell.len() && l.path.0.starts_with(&cell))
+        .min_by(|a, b| {
+            gap(y, a.top, a.bottom)
+                .total_cmp(&gap(y, b.top, b.bottom))
+                .then(gap(x, a.left, a.right).total_cmp(&gap(x, b.left, b.right)))
+        })?;
+    Some(Pos {
+        story: best.story,
+        path: best.path.clone(),
+        off: best.para.off_at_x(best.li, x - best.x),
+    })
+}
+
+/// What a table has under the pointer, so the page can show the right mouse pointer and a
+/// press can resize or select, as in Word and spreadsheets.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableSpot {
+    /// "column" (a column border: drag left and right), "row" (a row's bottom border: drag up
+    /// and down), "corner" (the resize handle), "selectColumn" (just above a column),
+    /// "selectRow" (left of a row) or "selectTable" (the move handle).
+    pub kind: &'static str,
+    /// The border's line, page points: from (x0, y0) to (x1, y1).
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+}
+
+/// How near a border (points) the pointer has to be to grab it.
+const BORDER_REACH: f32 = 3.0;
+
+pub(crate) fn table_spot(s: &mut Session, page: usize, x: f32, y: f32) -> Option<TableSpot> {
+    use wordcraft_engine::cmd::{table_mouse, table_resize};
+    let layout = s.layout();
+    let story = match story_kind(s) {
+        "header" | "footer" => s.sel.focus.story,
+        _ => StoryRef::Body,
+    };
+    if let Some(t) = table_resize::resize_target(&layout, &s.doc, page, x, y, BORDER_REACH)
+        .filter(|t| t.story == story)
+    {
+        let (left, right, top, bottom) = (t.left(), t.right(), t.top(), t.bottom());
+        return Some(match t.edge {
+            table_resize::Edge::Column(line) => {
+                let gx = t.cols.get(line).copied().unwrap_or(x);
+                TableSpot { kind: "column", x0: gx, y0: top, x1: gx, y1: bottom }
+            }
+            table_resize::Edge::Row(row) => {
+                let gy = t.rows.iter().find(|r| r.row == row).map_or(y, |r| r.bottom);
+                TableSpot { kind: "row", x0: left, y0: gy, x1: right, y1: gy }
+            }
+            table_resize::Edge::Corner => TableSpot { kind: "corner", x0: right, y0: bottom, x1: right, y1: bottom },
+        });
+    }
+    let t = table_mouse::target_at(&layout, &s.doc, story, page, x, y, BORDER_REACH)?;
+    let kind = match t.spot {
+        table_mouse::Spot::Column(_) => "selectColumn",
+        table_mouse::Spot::Row(_) => "selectRow",
+        table_mouse::Spot::Handle => "selectTable",
+        // A click along a cell's left edge puts the cursor there, like anywhere else in it.
+        _ => return None,
+    };
+    Some(TableSpot { kind, x0: x, y0: y, x1: x, y1: y })
+}
+
+/// What a table has under a point on a page (see [`TableSpot`]); null away from tables.
+#[tauri::command(async)]
+pub fn engine_table_spot(
+    state: State<EngineState>,
+    doc: u32,
+    page: usize,
+    x: f32,
+    y: f32,
+) -> Result<Option<TableSpot>, String> {
+    with_doc(&state, doc, |s| Ok(table_spot(s, page, x, y)))
 }
 
 /// A double click: in the header or footer area it goes in to edit it (making one if the page
@@ -997,6 +1149,93 @@ mod tests {
         // Without what was drawn before (a new zoom), the whole page again.
         let r = paint(&mut docs, 1, 0, 1.0, false).unwrap();
         assert_eq!(header(&r)[3], header(&r)[1]);
+    }
+
+    /// Compare the screen and PDF export by eye: LITHORA_FILE=doc.docx LITHORA_OUT=dir
+    /// cargo test --lib screen_and_pdf -- --ignored
+    #[test]
+    #[ignore]
+    fn screen_and_pdf_of_a_file() {
+        let (Ok(file), Ok(out)) = (std::env::var("LITHORA_FILE"), std::env::var("LITHORA_OUT")) else {
+            return;
+        };
+        let (doc, _) =
+            wordcraft_engine::io::open_path_in(std::path::Path::new(&file), None, &Region::default())
+                .unwrap();
+        let mut docs = Documents::default();
+        docs.sessions.insert(1, Session::new(doc));
+        let pages = docs.sessions.get_mut(&1).unwrap().layout().pages.len();
+        for page in 0..pages {
+            let r = paint(&mut docs, 1, page, 2.0, false).unwrap();
+            let w = u32::from_le_bytes(r[0..4].try_into().unwrap());
+            let h = u32::from_le_bytes(r[4..8].try_into().unwrap());
+            std::fs::write(format!("{out}/screen-{page}.rgba-{w}x{h}"), &r[16..]).unwrap();
+        }
+        let s = docs.sessions.get_mut(&1).unwrap();
+        run(s, "file.printPdf", json!({ "path": format!("{out}/export.pdf") })).unwrap();
+    }
+
+    #[test]
+    fn selected_table_columns_are_shaded() {
+        use wordcraft_engine::layout::Placed;
+        let rtf = r"{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}}
+\trowd\cellx3000\cellx6000 a\cell b\cell\row
+\trowd\cellx3000\cellx6000 c\cell \cell\row
+\pard\par}";
+        let mut s = session_for("cols.rtf", rtf);
+        let layout = s.layout();
+        let r = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|it| match it {
+                Placed::Cell { rect, row: 0, cell: 1, .. } => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        let (x, y) = (r.x + r.w / 2.0, r.y - 2.0);
+        assert_eq!(table_spot(&mut s, 0, x, y).map(|t| t.kind), Some("selectColumn"));
+        run(&mut s, "table.selectAt", json!({ "page": 0, "x": x, "y": y })).unwrap();
+        let state = doc_state(1, &mut s);
+        assert_eq!(state.selection.len(), 2, "both cells of the column, the empty one too");
+        // A column border is grabbed for resizing.
+        assert_eq!(table_spot(&mut s, 0, r.x, r.y + r.h / 2.0).map(|t| t.kind), Some("column"));
+    }
+
+    #[test]
+    fn a_click_anywhere_in_a_table_cell_lands_in_that_cell() {
+        use wordcraft_engine::layout::Placed;
+        // Three columns: long text that wraps, a short "P", and an empty cell, as in a test plan.
+        let long = "Steps that wrap over several lines of this narrow column. ".repeat(4);
+        let rtf = format!(
+            r"{{\rtf1\ansi\deff0{{\fonttbl{{\f0 Times New Roman;}}}}
+\trowd\cellx3000\cellx6000\cellx9000 {long}\cell P\cell \cell\row
+\pard\par}}"
+        );
+        let mut s = session_for("cells.rtf", &rtf);
+        let layout = s.layout();
+        let rect = |want: usize| {
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|it| match it {
+                    Placed::Cell { rect, cell, .. } if *cell == want => Some(*rect),
+                    _ => None,
+                })
+                .expect("the cell is laid out")
+        };
+        let cell_of = |s: &Session| s.sel.focus.path.0.get(2).copied();
+        for want in [1usize, 2, 0] {
+            let r = rect(want);
+            // Low down and to the right in the cell, far from its text, and near its left edge.
+            for (x, y) in [
+                (r.x + r.w * 0.8, r.y + r.h * 0.85),
+                (r.x + r.w * 0.5, r.y + r.h * 0.5),
+                (r.x + 1.0, r.y + r.h * 0.9),
+            ] {
+                click_at(&mut s, 0, x, y, false).unwrap();
+                assert_eq!(cell_of(&s), Some(want as u32), "click at ({x}, {y}) in cell {want}");
+            }
+        }
     }
 
     #[test]

@@ -36,6 +36,15 @@
   }
 }
 
+/* A found mistake (Spelling, Proofread) flashes so the eye finds it on the page. */
+@keyframes lithora-flash {
+  0%, 50% { background-color: rgba(250, 204, 21, 0.75); box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9); }
+  100% { background-color: rgba(108, 159, 203, 0.35); box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+}
+.lithora-flash {
+  animation: lithora-flash 1.5s ease-out;
+}
+
 /* Scrollbars: slim, rounded and in the logo blues, instead of the system's gray bars. */
 ::-webkit-scrollbar {
   width: 10px;

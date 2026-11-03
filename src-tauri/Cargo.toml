@@ -1,6 +1,6 @@
 [package]
 name = "lithora"
-version = "0.5.2"
+version = "0.5.3"
 description = "Lithora, a multilingual Word and RTF editor"
 authors = ["Kisaragi and the Lithora contributors"]
 license = "MIT OR Apache-2.0"
@@ -64,3 +64,5 @@ opt-level = 2
 wordcraft-formats = { path = "vendor/wordcraft-formats" }
 # Lithora's copy of WordCraft's proofing, with Armenian spelling (see vendor/wordcraft-proof).
 wordcraft-proof = { path = "vendor/wordcraft-proof" }
+# Lithora's copy of WordCraft's layout, with a line-breaking fix (see vendor/wordcraft-layout).
+wordcraft-layout = { path = "vendor/wordcraft-layout" }
