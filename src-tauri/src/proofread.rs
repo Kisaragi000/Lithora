@@ -75,7 +75,7 @@ pub fn engine_proofread_fix(state: State<EngineState>, doc: u32, fixes: Vec<Fix>
 pub(crate) fn apply(s: &mut Session, mut fixes: Vec<Fix>) -> Result<usize, String> {
     let key = |p: &Pos| (s.doc.para_paths(p.story).iter().position(|q| *q == p.path).unwrap_or(usize::MAX), p.off);
     let mut keyed: Vec<_> = fixes.drain(..).map(|f| (key(&f.start), f)).collect();
-    keyed.sort_by(|a, b| b.0.cmp(&a.0));
+    keyed.sort_by_key(|k| std::cmp::Reverse(k.0));
     let mut done = 0;
     let mut last_start: Option<(usize, usize)> = None;
     for (k, f) in keyed {
@@ -115,7 +115,9 @@ pub(crate) fn proofread(s: &mut Session) -> Vec<ProofIssue> {
             continue;
         }
         let runs = proof_runs(&s.doc, p, None);
-        let issues = paragraph_issues(p, &runs, &spelling, true, is_list_item(&s.doc, p));
+        // A list item or a table cell (a path longer than one block) needn't start with a capital,
+        // as on the page.
+        let issues = paragraph_issues(p, &runs, &spelling, true, is_list_item(&s.doc, p) || path.0.len() > 1);
         paras.push((path, p.text.clone(), runs, issues));
     }
     // English grammar and style for all paragraphs at once.
@@ -430,8 +432,8 @@ fn distance(a: &str, b: &str) -> usize {
     for (i, row) in d.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=b.len() {
-        d[0][j] = j;
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
     }
     for i in 1..=a.len() {
         for j in 1..=b.len() {
@@ -486,6 +488,24 @@ mod tests {
         std::fs::write(&path, body).unwrap();
         let (doc, _) = wordcraft_engine::io::open_path_in(&path, None, &wordcraft_engine::Region::default()).unwrap();
         Session::new(doc)
+    }
+
+    fn session_md(body: &str) -> Session {
+        let dir = std::env::temp_dir().join(format!("lithora-proof-md-{}-{}", std::process::id(), body.len()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.md");
+        std::fs::write(&path, body).unwrap();
+        let (doc, _) = wordcraft_engine::io::open_path_in(&path, None, &wordcraft_engine::Region::default()).unwrap();
+        Session::new(doc)
+    }
+
+    #[test]
+    fn table_cells_need_not_start_with_a_capital() {
+        let mut s = session_md("| Field | Notes |\n| --- | --- |\n| address | including the street name |\n\nthis line should start with a capital.\n");
+        let issues = proofread(&mut s);
+        let capital = |w: &str| issues.iter().any(|i| i.text == w && i.message.starts_with("Capitalize"));
+        assert!(capital("this"), "{issues:#?}");
+        assert!(!capital("address") && !capital("including"), "{issues:#?}");
     }
 
     fn text(s: &Session) -> String {

@@ -45,7 +45,7 @@ code-signed yet, Windows SmartScreen may say the publisher is unknown; choose
 **More info**, then **Run anyway**.
 
 Lithora updates itself: click **Check for updates** in the title bar, and the new version
-installs and restarts the app.
+installs and restarts the app. See what changed in each version in [CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 
@@ -57,18 +57,25 @@ installs and restarts the app.
 - Armenian and Cyrillic text survives the trip through RTF and Word unchanged.
 
 **Writing**
-- A Word-style ribbon, with Table and Header & Footer tabs that appear when you need them.
-- Several documents open at once, in tabs.
-- Find and replace, change case (Shift+F3), comments and tracked changes.
+- A Word-style ribbon (File, Home, Insert, Design, Layout, References, Review and View), with
+  Table and Header & Footer tabs that appear when you need them.
+- Several documents open at once, in tabs; drag a tab out to give it its own window.
+- Font, Paragraph and Page setup dialogs, styles, columns, page borders and watermarks.
+- Tables that edit like a spreadsheet: click anywhere in a cell, drag borders to resize.
+- Pictures, shapes, text boxes, equations, symbols, links and bookmarks.
+- Table of contents, footnotes and endnotes, captions and cross-references.
+- Find and replace, change case (Shift+F3), comments, tracked changes and document compare.
 - Spell check as you type in English, Russian and Armenian, with suggestions on right-click.
 - Proofread panel with grammar and style checks for English, and basic checks for Russian and
   Armenian. Everything runs offline.
 
-**Signing and printing**
+**Signing, printing and protecting**
 - Draw your signature with a mouse, pen or finger, save it, and place it anywhere in a
   document. A drawn signature is a picture, not a certified digital signature, so check what
   the person or office you send the document to accepts.
-- Print to any installed printer, with copies, page ranges and two-sided printing.
+- Print to any installed printer, with copies, page ranges and two-sided printing, and see
+  the pages first in print preview.
+- Open and save password-protected Word files.
 
 **Peace of mind**
 - A History panel: click any earlier step to go back to it.
@@ -113,16 +120,17 @@ signatures, printing and more on top.
 |---|---|
 | `src/desktop/` | The interface: ribbon, page view, dialogs, panels, translations |
 | `src-tauri/src/` | The desktop shell: engine bridge, printing, proofreading, signatures, updates |
-| `src-tauri/vendor/` | Lithora's patched copies of two WordCraft crates |
+| `src-tauri/vendor/` | Lithora's patched copies of three WordCraft crates (file formats, proofing, layout) |
 | `src-tauri/dictionaries/` | Russian and Armenian spelling dictionaries |
 | `third-party/` | Licenses and notices of bundled third-party code and fonts |
 
 ### Releases
 
-Raise the version number in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml` and
-`src-tauri/tauri.conf.json`, then merge to `main`. GitHub Actions builds the Windows and Linux
-installers and publishes the release, and the app's update button picks it up. Merges that
-keep the version number don't publish anything.
+Raise the version number in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`,
+`src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json`, add a section for it at the top of
+[CHANGELOG.md](CHANGELOG.md), then merge to `main`. GitHub Actions builds the Windows and Linux
+installers and publishes the release with that section as its notes, and the app's update
+button picks it up. Merges that keep the version number don't publish anything.
 
 ## Contributing
 

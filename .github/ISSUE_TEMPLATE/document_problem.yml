@@ -1,0 +1,42 @@
+name: A document looks wrong
+description: A file that doesn't open, or looks different than in Word, or changes when saved.
+labels: [documents]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lithora aims to show documents exactly as Word does. Please attach the document if you can:
+        only attach files you are happy to share publicly, and remove anything private first.
+  - type: input
+    id: version
+    attributes:
+      label: Lithora version
+      description: Settings › About Lithora shows it.
+      placeholder: "0.5.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: File type
+      options:
+        - Word (.docx, .docm, .dotx)
+        - Old Word (.doc)
+        - RTF
+        - OpenDocument (.odt)
+        - HTML, Markdown or text
+        - PDF export
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What looks wrong?
+      description: For example "the table is too wide" or "the Armenian text turns into question marks after saving". A screenshot from Lithora and one from Word help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: file
+    attributes:
+      label: The document
+      description: Drag the file into this box (zip it first if GitHub refuses the file type).

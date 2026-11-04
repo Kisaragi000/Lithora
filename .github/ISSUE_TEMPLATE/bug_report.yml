@@ -1,0 +1,45 @@
+name: Something doesn't work
+description: A button, menu, shortcut or window that does the wrong thing, or a crash.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping make Lithora better. A few details help us find the problem quickly.
+  - type: input
+    id: version
+    attributes:
+      label: Lithora version
+      description: Settings › About Lithora shows it.
+      placeholder: "0.5.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Ubuntu, Debian or Mint (.deb)
+        - Fedora or openSUSE (.rpm)
+        - Other Linux (AppImage)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: The steps, one per line, so we can do the same.
+      placeholder: |
+        1. Open a document with a table
+        2. Click in the second column
+        3. Type a word
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what did you expect?
+      description: Screenshots help a lot. Drag them into this box.
+    validations:
+      required: true

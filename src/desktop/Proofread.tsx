@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, SpellCheck2, WandSparkles } from 'lucide-react';
 import { DocState, ProofIssue, engine } from './engine';
 import type { Strings } from './strings';
+import { issueMessage, suggestionLabel } from './proofText';
 
 type Filter = 'all' | ProofIssue['kind'];
 
@@ -125,7 +126,7 @@ export function ProofreadPanel({
                   </mark>
                   {issue.context.slice(issue.at[1])}
                 </p>
-                <p className="mt-1 text-[12px] text-slate-700">{issue.message || t.possibleMisspelling}</p>
+                <p className="mt-1 text-[12px] text-slate-700">{issueMessage(t, issue.kind, issue.message)}</p>
               </button>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {issue.suggestions.slice(0, 4).map((s, k) => (
@@ -135,7 +136,7 @@ export function ProofreadPanel({
                     onClick={() => onFix(issue, s)}
                     className="rounded-md bg-[#376FA3]/10 px-2 py-0.5 text-[12px] font-medium text-[#083B69] hover:bg-[#376FA3]/20"
                   >
-                    {s === '' ? t.deleteText : s.replace(/ /g, ' ')}
+                    {suggestionLabel(t, s)}
                   </button>
                 ))}
                 <button

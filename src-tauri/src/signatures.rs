@@ -36,7 +36,7 @@ pub fn signatures_list(app: AppHandle) -> Result<Vec<Signature>, String> {
             (path.extension()? == "png" && valid(&id)).then(|| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), id, path))
         })
         .collect();
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     Ok(files
         .into_iter()
         .filter_map(|(_, id, path)| {

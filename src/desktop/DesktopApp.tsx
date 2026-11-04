@@ -18,6 +18,7 @@ import { forgetScroll, PageView, PageViewHandle } from './PageView';
 import { Ribbon, RibbonAction } from './Ribbon';
 import { strings } from './strings';
 import { UpdateButton } from './UpdateButton';
+import { issueMessage, suggestionLabel } from './proofText';
 import { ContextMenu, MenuItem } from './ContextMenu';
 import { LinkDialog, PrintDialog, RecoveryDialog, SymbolDialog, TextDialog, WordCountDialog, WordCountInfo } from './Dialogs';
 import { FindBar } from './FindBar';
@@ -55,6 +56,10 @@ const OWN_DOC = (() => {
 const PICTURE_FILE = /\.(png|jpe?g|gif|bmp|webp|emf|wmf)$/i;
 /** Files a template can be. */
 const TEMPLATE_EXTENSIONS = ['dotx', 'dotm', 'dot', 'ott', 'docx', 'doc', 'odt', 'rtf'];
+
+// The header's History, Settings and Spelling names hide on a window too narrow for them (the
+// icons and tooltips stay), so the document's name keeps its room. Longer words need more width.
+const HEADER_LABEL: Record<Language, string> = { en: 'hidden lg:inline', ru: 'hidden xl:inline', hy: 'hidden 2xl:inline' };
 
 const LANGUAGE_KEY = 'lithora_ui_language';
 const ZOOM_KEY = 'lithora_zoom';
@@ -584,9 +589,9 @@ export const DesktopApp: React.FC = () => {
   const issueItems = (issue: Issue | null): MenuItem[] => {
     if (!issue) return [];
     const items: MenuItem[] = [];
-    if (issue.kind === 'grammar') items.push({ label: issue.message, onClick: () => undefined, muted: true, disabled: true });
+    if (issue.kind === 'grammar') items.push({ label: issueMessage(t, issue.kind, issue.message), onClick: () => undefined, muted: true, disabled: true });
     if (issue.suggestions.length === 0) items.push({ label: t.noSuggestions, onClick: () => undefined, muted: true, disabled: true });
-    for (const s of issue.suggestions.slice(0, 6)) items.push({ label: s, strong: true, onClick: () => onCommand('review.applySuggestion', { text: s }) });
+    for (const s of issue.suggestions.slice(0, 6)) items.push({ label: suggestionLabel(t, s), strong: true, onClick: () => onCommand('review.applySuggestion', { text: s }) });
     if (issue.kind === 'spelling') {
       items.push({ label: t.addToDictionary, onClick: () => onCommand('review.addToDictionary', { word: issue.text }) });
       items.push({ label: t.ignoreAll, onClick: () => onCommand('review.ignoreAll', { word: issue.text }) });
@@ -1030,19 +1035,20 @@ export const DesktopApp: React.FC = () => {
               panel === 'history' ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'
             }`}
           >
-            <History className="h-4 w-4 text-[#376FA3]" /> {t.history}
+            <History className="h-4 w-4 text-[#376FA3]" /> <span className={HEADER_LABEL[lang]}>{t.history}</span>
           </button>
-          <SettingsMenu t={t} autosave={autosave} onAutosave={setAutosave} updateCheck={updateCheck} onUpdateCheck={setUpdateCheck} />
+          <SettingsMenu t={t} autosave={autosave} onAutosave={setAutosave} updateCheck={updateCheck} onUpdateCheck={setUpdateCheck} labelClass={HEADER_LABEL[lang]} />
           <button
             type="button"
             disabled={!active}
+            title={t.spelling}
             onMouseDown={() => (spellingMenuOpen.current = menu !== null)}
             onClick={openSpellingMenu}
             className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium hover:bg-slate-100 disabled:opacity-40 ${
               panel === 'proofread' ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'
             }`}
           >
-            <SpellCheck className="h-4 w-4 text-[#376FA3]" /> {t.spelling}
+            <SpellCheck className="h-4 w-4 text-[#376FA3]" /> <span className={HEADER_LABEL[lang]}>{t.spelling}</span>
             <ChevronDown className="h-3 w-3 opacity-60" />
           </button>
           <span className="mx-1 h-5 w-px bg-slate-200" />

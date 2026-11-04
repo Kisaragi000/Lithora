@@ -161,12 +161,14 @@ export function SidePanel({
     <button
       type="button"
       onClick={() => onKind(k)}
-      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium ${
-        kind === k ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-600 hover:text-[#083B69]'
+      title={label}
+      className={`inline-flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium ${
+        kind === k ? 'shrink-0 bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-600 hover:text-[#083B69]'
       }`}
     >
-      {icon}
-      {label}
+      <span className="shrink-0">{icon}</span>
+      {/* All three names don't fit beside the close button, so only the open tab shows its name. */}
+      {kind === k && <span className="truncate">{label}</span>}
     </button>
   );
 
@@ -185,7 +187,7 @@ export function SidePanel({
         {tab('history', t.history, <HistoryIcon className="h-4 w-4" />)}
         {tab('comments', t.comments, <MessageSquare className="h-4 w-4" />)}
         {tab('proofread', t.proofread, <SpellCheck className="h-4 w-4" />)}
-        <button type="button" onClick={onClose} title={t.close} aria-label={t.close} className="ml-auto rounded p-1 text-slate-500 hover:bg-slate-100">
+        <button type="button" onClick={onClose} title={t.close} aria-label={t.close} className="ml-auto shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100">
           <X className="h-4 w-4" />
         </button>
       </div>

@@ -32,6 +32,55 @@ interface Props {
 
 const fill = (text: string, version: string) => text.replace('{version}', version);
 
+/** The update errors Lithora's updater reports, in the interface's language. */
+const ERRORS: [string, keyof Strings][] = [
+  ['Could not reach GitHub', 'updErrOffline'],
+  ['Unexpected answer from GitHub', 'updErrOffline'],
+  ['No published release yet', 'updErrNoRelease'],
+  ['Download failed', 'updErrDownload'],
+  ['The download was incomplete', 'updErrDownload'],
+  ['The downloaded file is damaged', 'updErrDamaged'],
+  ['This update is not signed', 'updErrUnsigned'],
+  ['The new release has no file', 'updErrNoFile'],
+  ["This copy of Lithora can't update itself", 'updErrCantUpdate'],
+  ['Could not start the installer', 'updErrInstall'],
+  ['Could not replace Lithora', 'updErrInstall'],
+  ['Could not restart Lithora', 'updErrInstall'],
+  ['The update was not installed', 'updErrCancelled'],
+];
+
+function updateError(t: Strings, e: unknown): string {
+  const text = String(e);
+  const known = ERRORS.find(([start]) => text.startsWith(start));
+  return `${t.updateFailed}: ${known ? String(t[known[1]]) : text}`;
+}
+
+/** The first points of a release's notes (its Markdown list), as plain text for the dialog. */
+function releaseHighlights(notes: string, max = 8): string[] {
+  const items: string[] = [];
+  let inItem = false;
+  for (const line of notes.split(/\r?\n/)) {
+    if (/^#{1,6}\s/.test(line) && items.length > 0) break;
+    const item = line.match(/^\s*[-*]\s+(.*)$/);
+    if (item) {
+      if (items.length >= max) break;
+      items.push(item[1]);
+      inItem = true;
+    } else if (inItem && /^\s+\S/.test(line)) {
+      // A point that goes on over the next line.
+      items[items.length - 1] += ` ${line.trim()}`;
+    } else {
+      inItem = false;
+    }
+  }
+  const plain = (text: string) =>
+    text
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/\*\*|`/g, '')
+      .trim();
+  return items.map(plain).filter(Boolean).map((text) => `• ${text}`);
+}
+
 export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify, autoCheck }) => {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 
@@ -47,7 +96,7 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify, autoChe
       if (!quiet) notify(fill(t.upToDate, info.current));
     } catch (e) {
       setPhase({ kind: 'idle' });
-      if (!quiet) notify(`${t.updateFailed}: ${e}`, true);
+      if (!quiet) notify(updateError(t, e), true);
     }
     return null;
   }, [notify, t]);
@@ -80,7 +129,12 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify, autoChe
       return;
     }
     const unsaved = unsavedNames();
-    const message = [fill(t.updateConfirm, info.latest), unsaved.length ? `${unsaved.join(', ')} ${t.unsavedUpdate}` : '']
+    const highlights = releaseHighlights(info.notes);
+    const message = [
+      fill(t.updateConfirm, info.latest),
+      highlights.length ? [t.whatsNew, ...highlights].join('\n') : '',
+      unsaved.length ? `${unsaved.join(', ')} ${t.unsavedUpdate}` : '',
+    ]
       .filter(Boolean)
       .join('\n\n');
     const sure = await ask(message, { title: 'Lithora', kind: unsaved.length ? 'warning' : 'info', okLabel: t.updateNow, cancelLabel: t.later });
@@ -91,7 +145,7 @@ export const UpdateButton: React.FC<Props> = ({ t, unsavedNames, notify, autoChe
       await invoke('install_update');
     } catch (e) {
       setPhase({ kind: 'available', info });
-      notify(`${t.updateFailed}: ${e}`, true);
+      notify(updateError(t, e), true);
     }
   }, [notify, t, unsavedNames]);
 
