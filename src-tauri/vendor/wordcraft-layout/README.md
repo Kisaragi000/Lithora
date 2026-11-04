@@ -10,3 +10,6 @@ Lithora's changes:
 - A word that starts with a full stop, comma, colon or semicolon after a space (".docx")
   can wrap to the next line whole, as in Word. Before, Unicode's rules joined it to the word
   before it, and in a narrow table cell the pair split mid-letter (".d" / "ocx").
+- Text in a table cell isn't asked to start with a capital letter (the grammar rule is off
+  for a cell's paragraphs, as it already was for list items): forms and tables are full of
+  fragments such as "включая название улицы" that continue the line above.

@@ -551,7 +551,7 @@ export const Ribbon = React.memo(function Ribbon({
             <Btn wide title={t.exportPdf} disabled={none} onClick={() => onAction('exportPdf')}>
               <FileDown className="h-4 w-4" /> {t.exportPdf}
             </Btn>
-            <span className="ml-3 hidden shrink-0 whitespace-nowrap text-[12px] text-slate-500 xl:inline">{t.autoRecoverNote.replace('{every}', recoveryEvery)}</span>
+            <span className="ml-3 hidden shrink-0 whitespace-nowrap text-[12px] text-slate-500 2xl:inline">{t.autoRecoverNote.replace('{every}', recoveryEvery)}</span>
           </>
         )}
 

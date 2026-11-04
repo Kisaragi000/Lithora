@@ -793,7 +793,7 @@ pub(crate) fn cell_hit(
     };
     for q in (0..page).rev() {
         let lines = wordcraft_engine::layout::hit::page_lines(&layout.pages[q], story);
-        if let Some(l) = lines.iter().filter(in_cell).last() {
+        if let Some(l) = lines.iter().rev().find(in_cell) {
             return Some(end_of(l));
         }
     }

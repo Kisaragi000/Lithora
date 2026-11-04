@@ -586,7 +586,7 @@ export function ViewTab({
         <Pilcrow className="h-4 w-4" /> {t.showMarks}
       </Btn>
       <Divider />
-      <Popover title={t.zoom} disabled={none} label={label(<ZoomIn className="h-4 w-4" />, `${Math.round(zoom * 100)}%`)}>
+      <Popover title={t.zoom} disabled={none} label={label(<ZoomIn className="h-4 w-4" />, t.zoom)}>
         {(close) => (
           <div className="flex w-44 flex-col">
             {[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => (

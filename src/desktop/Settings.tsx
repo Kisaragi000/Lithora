@@ -72,9 +72,11 @@ interface MenuProps {
   onAutosave(seconds: number): void;
   updateCheck: boolean;
   onUpdateCheck(on: boolean): void;
+  /** Classes for the button's name, which hides on a narrow window (the icon stays). */
+  labelClass?: string;
 }
 
-export function SettingsMenu({ t, autosave, onAutosave, updateCheck, onUpdateCheck }: MenuProps) {
+export function SettingsMenu({ t, autosave, onAutosave, updateCheck, onUpdateCheck, labelClass }: MenuProps) {
   const [open, setOpen] = useState(false);
   const [about, setAbout] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -85,12 +87,13 @@ export function SettingsMenu({ t, autosave, onAutosave, updateCheck, onUpdateChe
         ref={button}
         type="button"
         aria-expanded={open}
+        title={t.settings}
         onClick={() => setOpen((o) => !o)}
         className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium hover:bg-slate-100 ${
           open ? 'bg-[#376FA3]/15 text-[#083B69]' : 'text-slate-700'
         }`}
       >
-        <SettingsIcon className="h-4 w-4 text-[#376FA3]" /> {t.settings}
+        <SettingsIcon className="h-4 w-4 text-[#376FA3]" /> <span className={labelClass}>{t.settings}</span>
         <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
       {open && button.current && (
