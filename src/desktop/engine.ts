@@ -226,7 +226,7 @@ export const engine = {
 };
 
 /** File types Lithora opens. */
-export const OPEN_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt', 'ott', 'xml', 'htm', 'html', 'md', 'txt'];
+export const OPEN_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'rtf', 'odt', 'ott', 'pdf', 'xml', 'htm', 'html', 'md', 'txt'];
 
 /** File types Lithora saves, in the order the Save dialog offers them. */
 export const SAVE_FILTERS = [

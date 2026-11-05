@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lithora",
-  "version": "0.5.6",
+  "version": "0.6.0",
   "identifier": "io.github.kisaragi000.lithora",
   "build": {
     "frontendDist": "../dist",
@@ -87,6 +87,15 @@
       "dictionaries/": "dictionaries/"
     },
     "fileAssociations": [
+      {
+        "ext": [
+          "pdf"
+        ],
+        "name": "PDF Document",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      },
       {
         "ext": [
           "docx"

@@ -2,6 +2,7 @@
 import type { Language } from '../types/document';
 import { moreStrings, type MoreStrings } from './stringsMore';
 import { wordStrings, type WordStrings } from './stringsWord';
+import { pdfStrings, type PdfStrings } from './stringsPdf';
 
 const en = {
   open: 'Open',
@@ -113,11 +114,11 @@ const en = {
   updErrInstall: 'The installer could not start or replace Lithora.',
   updErrCancelled: 'The update was not installed.',
   whatsNew: "What's new:",
-  openHint: 'Open a Word, RTF or OpenDocument file, or drop one here.',
+  openHint: 'Open a Word, RTF, OpenDocument or PDF file, or drop one here.',
 };
 
 type BaseStrings = typeof en;
-type Strings = BaseStrings & MoreStrings & WordStrings;
+type Strings = BaseStrings & MoreStrings & WordStrings & PdfStrings;
 
 const ru: BaseStrings = {
   open: 'Открыть',
@@ -229,7 +230,7 @@ const ru: BaseStrings = {
   updErrInstall: 'Не удалось запустить установщик или заменить Lithora.',
   updErrCancelled: 'Обновление не установлено.',
   whatsNew: 'Что нового:',
-  openHint: 'Откройте файл Word, RTF или OpenDocument или перетащите его сюда.',
+  openHint: 'Откройте файл Word, RTF, OpenDocument или PDF или перетащите его сюда.',
 };
 
 const hy: BaseStrings = {
@@ -342,12 +343,12 @@ const hy: BaseStrings = {
   updErrInstall: 'Չհաջողվեց գործարկել տեղադրիչը կամ փոխարինել Lithora-ն։',
   updErrCancelled: 'Թարմացումը չտեղադրվեց։',
   whatsNew: 'Ինչ է նոր․',
-  openHint: 'Բացեք Word, RTF կամ OpenDocument ֆայլ կամ քաշեք այն այստեղ։',
+  openHint: 'Բացեք Word, RTF, OpenDocument կամ PDF ֆայլ կամ քաշեք այն այստեղ։',
 };
 
 export const strings: Record<Language, Strings> = {
-  en: { ...en, ...moreStrings.en, ...wordStrings.en },
-  ru: { ...ru, ...moreStrings.ru, ...wordStrings.ru },
-  hy: { ...hy, ...moreStrings.hy, ...wordStrings.hy },
+  en: { ...en, ...moreStrings.en, ...wordStrings.en, ...pdfStrings.en },
+  ru: { ...ru, ...moreStrings.ru, ...wordStrings.ru, ...pdfStrings.ru },
+  hy: { ...hy, ...moreStrings.hy, ...wordStrings.hy, ...pdfStrings.hy },
 };
 export type { Strings };

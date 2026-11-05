@@ -8,7 +8,7 @@ import { ask, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { BookOpen, CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, WandSparkles, X } from 'lucide-react';
+import { BookOpen, CaseSensitive, ChevronDown, ClipboardPaste, Copy, FileText, FileType2, FolderOpen, Globe, History, Link2, MessageSquarePlus, Minus, Plus, Save, Scissors, SpellCheck, SpellCheck2, TriangleAlert, WandSparkles, X } from 'lucide-react';
 import type { Language } from '../types/document';
 import { LithoraLogo } from '../components/LithoraLogo';
 import { DropOverlay } from '../components/DropOverlay';
@@ -45,6 +45,10 @@ import {
   WatermarkDialog,
 } from './WordDialogs';
 import type { ParagraphInfo } from './engine';
+import { isPdfPath, pdf, PdfInfo } from './pdf';
+import { PdfSelection, PdfTool, PdfView, PdfViewHandle } from './PdfView';
+import { PdfToolbar } from './PdfToolbar';
+import { PdfFontsDialog } from './PdfFonts';
 
 /** The document this window was opened for, when a tab was dragged out into it. */
 const OWN_DOC = (() => {
@@ -96,7 +100,8 @@ type Dialog =
   | { kind: 'openPassword'; path: string; wrong: boolean }
   | { kind: 'properties' }
   | { kind: 'thesaurus' }
-  | { kind: 'preview' };
+  | { kind: 'preview' }
+  | { kind: 'pdfFonts' };
 
 interface Issue {
   text: string;
@@ -162,8 +167,29 @@ export const DesktopApp: React.FC = () => {
   const untitledCount = useRef(0);
   const docsRef = useRef(docs);
   docsRef.current = docs;
+  /** Open PDFs: tabs of their own, edited in place (src/desktop/PdfView.tsx). */
+  const [pdfs, setPdfs] = useState<PdfInfo[]>([]);
+  const pdfsRef = useRef(pdfs);
+  pdfsRef.current = pdfs;
+  const pdfView = useRef<PdfViewHandle>(null);
+  const [pdfTool, setPdfTool] = useState<PdfTool>('edit');
+  const [pdfSel, setPdfSel] = useState<PdfSelection | null>(null);
+  const [pdfFontList, setPdfFontList] = useState<string[]>([]);
+  /** PDFs whose missing-fonts notice was closed. */
+  const [fontNoticeClosed, setFontNoticeClosed] = useState<Record<number, boolean>>({});
+  /** The order tabs were opened in (documents and PDFs share the tab bar). */
+  const tabOrder = useRef(new Map<number, number>());
+  const tabSeq = useRef(0);
+  const placeTab = (id: number) => {
+    if (!tabOrder.current.has(id)) tabOrder.current.set(id, ++tabSeq.current);
+  };
 
   const active = docs.find((d) => d.id === activeId) ?? null;
+  const activePdf = active ? null : (pdfs.find((p) => p.id === activeId) ?? null);
+  const tabs = [
+    ...docs.map((d) => ({ id: d.id, name: d.name, path: d.path, dirty: d.dirty, doc: d as DocState | null, info: null as PdfInfo | null })),
+    ...pdfs.map((p) => ({ id: p.id, name: p.name, path: p.path, dirty: p.dirty, doc: null as DocState | null, info: p as PdfInfo | null })),
+  ].sort((a, b) => (tabOrder.current.get(a.id) ?? 0) - (tabOrder.current.get(b.id) ?? 0));
 
   useEffect(() => {
     try {
@@ -200,16 +226,34 @@ export const DesktopApp: React.FC = () => {
 
   const showError = useCallback((text: string) => setNotice({ text, error: true }), []);
   const notify = useCallback((text: string, error?: boolean) => setNotice({ text, error }), []);
-  const unsavedNames = useCallback(() => docsRef.current.filter((d) => d.dirty).map((d) => d.name), []);
+  const unsavedNames = useCallback(() => [...docsRef.current, ...pdfsRef.current].filter((d) => d.dirty).map((d) => d.name), []);
 
   const updateDoc = useCallback((state: DocState) => {
     setDocs((list) => list.map((d) => (d.id === state.id ? state : d)));
   }, []);
 
   const addDoc = useCallback((state: DocState) => {
+    placeTab(state.id);
     setDocs((list) => [...list, state]);
     setActiveId(state.id);
     setCurrentPage(0);
+  }, []);
+
+  const updatePdf = useCallback((info: PdfInfo) => {
+    setPdfs((list) => list.map((p) => (p.id === info.id ? info : p)));
+  }, []);
+
+  const addPdf = useCallback((info: PdfInfo) => {
+    placeTab(info.id);
+    pdfsRef.current = [...pdfsRef.current, info];
+    setPdfs((list) => [...list, info]);
+    setActiveId(info.id);
+    setCurrentPage(0);
+    setPdfTool('edit');
+    pdf
+      .installedFonts()
+      .then((list) => setPdfFontList(list))
+      .catch(() => undefined);
   }, []);
 
   const loadFonts = useCallback((id: number) => {
@@ -231,13 +275,19 @@ export const DesktopApp: React.FC = () => {
       let opened = 0;
       for (const path of paths) {
         // A file that is already open just comes to the front.
-        const already = docsRef.current.find((d) => d.path === path);
+        const already = docsRef.current.find((d) => d.path === path) ?? pdfsRef.current.find((p) => p.path === path);
         if (already) {
           setActiveId(already.id);
           opened += 1;
           continue;
         }
         try {
+          if (isPdfPath(path)) {
+            addPdf(await pdf.open(path));
+            remember(path);
+            opened += 1;
+            continue;
+          }
           const state = await engine.open(path);
           docsRef.current = [...docsRef.current, state];
           addDoc(state);
@@ -255,7 +305,7 @@ export const DesktopApp: React.FC = () => {
       }
       return opened;
     },
-    [addDoc, lang, remember, showError],
+    [addDoc, addPdf, lang, remember, showError],
   );
 
   const openFiles = useCallback(async () => {
@@ -333,12 +383,66 @@ export const DesktopApp: React.FC = () => {
       }
       await engine.close(doc.id).catch(() => undefined);
       forgetScroll(doc.id);
-      const list = docsRef.current;
-      const index = list.findIndex((d) => d.id === doc.id);
-      const rest = list.filter((d) => d.id !== doc.id);
+      const next = neighbourOf(doc.id);
+      const rest = docsRef.current.filter((d) => d.id !== doc.id);
+      docsRef.current = rest;
       setDocs(rest);
-      setActiveId((current) => (current === doc.id ? (rest[Math.min(index, rest.length - 1)]?.id ?? null) : current));
+      setActiveId((current) => (current === doc.id ? next : current));
     },
+    [lang],
+  );
+
+  /** Save a PDF over its file, or (Save As, or never saved) where the user picks. */
+  const savePdf = useCallback(
+    async (p: PdfInfo, as: boolean) => {
+      await pdfView.current?.settle();
+      let target: string | undefined;
+      if (as || !p.path) {
+        const picked = await saveDialog({ defaultPath: p.path ?? p.name, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+        if (!picked) return false;
+        target = /\.pdf$/i.test(picked) ? picked : `${picked}.pdf`;
+      }
+      try {
+        updatePdf(await pdf.save(p.id, target));
+        setNotice({ text: `${strings[lang].savedAs} ${baseName(target ?? p.path ?? p.name)}` });
+        if (target) remember(target);
+        return true;
+      } catch (e) {
+        showError(`${strings[lang].couldNotSave}: ${e}`);
+        return false;
+      }
+    },
+    [lang, remember, showError, updatePdf],
+  );
+
+  /** The tab to show when tab `id` closes: the one after it, else the one before. */
+  const neighbourOf = (id: number) => {
+    const order = [...docsRef.current.map((d) => d.id), ...pdfsRef.current.map((p) => p.id)].sort(
+      (a, b) => (tabOrder.current.get(a) ?? 0) - (tabOrder.current.get(b) ?? 0),
+    );
+    const i = order.indexOf(id);
+    const rest = order.filter((x) => x !== id);
+    return rest[Math.min(Math.max(i, 0), rest.length - 1)] ?? null;
+  };
+
+  const closePdf = useCallback(
+    async (p: PdfInfo) => {
+      if (p.dirty) {
+        const sure = await ask(`${p.name} ${strings[lang].unsavedClose}`, {
+          title: 'Lithora',
+          kind: 'warning',
+          okLabel: strings[lang].closeAnyway,
+          cancelLabel: strings[lang].keep,
+        });
+        if (!sure) return;
+      }
+      await pdf.close(p.id).catch(() => undefined);
+      const next = neighbourOf(p.id);
+      pdfsRef.current = pdfsRef.current.filter((x) => x.id !== p.id);
+      setPdfs((list) => list.filter((x) => x.id !== p.id));
+      setActiveId((current) => (current === p.id ? next : current));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [lang],
   );
 
@@ -398,8 +502,14 @@ export const DesktopApp: React.FC = () => {
       if (opened === 0) {
         const blank = await newDocument();
         loadFonts(blank.id);
-      } else {
+      } else if (docsRef.current[0]) {
         loadFonts(docsRef.current[0].id);
+      } else {
+        // Only PDFs were opened: the installed fonts, for the first new document.
+        pdf
+          .installedFonts()
+          .then((list) => setFonts([...new Set(list)].sort((a, b) => a.localeCompare(b))))
+          .catch(() => undefined);
       }
       // Documents Lithora kept copies of when it last closed without saving them.
       const left = await engine.recoveryList().catch(() => [] as RecoveredDoc[]);
@@ -439,7 +549,7 @@ export const DesktopApp: React.FC = () => {
     let stop: (() => void) | undefined;
     getCurrentWindow()
       .onCloseRequested(async (event) => {
-        const unsaved = docsRef.current.filter((d) => d.dirty);
+        const unsaved = [...docsRef.current, ...pdfsRef.current].filter((d) => d.dirty);
         if (unsaved.length > 0) {
           const sure = await ask(`${unsaved.map((d) => d.name).join(', ')} ${strings[lang].unsavedClose}`, {
             title: 'Lithora',
@@ -465,6 +575,40 @@ export const DesktopApp: React.FC = () => {
   const shortcut = useCallback(
     (combo: string) => {
       const doc = docsRef.current.find((d) => d.id === activeId);
+      const p = doc ? undefined : pdfsRef.current.find((x) => x.id === activeId);
+      if (p) {
+        switch (combo) {
+          case 'Mod+S':
+            void savePdf(p, false);
+            return true;
+          case 'Mod+Shift+S':
+          case 'F12':
+            void savePdf(p, true);
+            return true;
+          case 'Mod+W':
+          case 'Mod+F4':
+            void closePdf(p);
+            return true;
+          case 'Mod+P':
+            setDialog({ kind: 'print' });
+            return true;
+          case 'Mod+Z':
+            pdfView.current?.undo();
+            return true;
+          case 'Mod+Y':
+          case 'Mod+Shift+Z':
+            pdfView.current?.redo();
+            return true;
+          case 'Mod+O':
+            void openFiles();
+            return true;
+          case 'Mod+N':
+            void newDocument();
+            return true;
+          default:
+            return false;
+        }
+      }
       switch (combo) {
         case 'Mod+S':
           if (doc) void save(doc);
@@ -525,7 +669,7 @@ export const DesktopApp: React.FC = () => {
           return false;
       }
     },
-    [activeId, closeDoc, newDocument, openFiles, readMode, save, saveAs],
+    [activeId, closeDoc, closePdf, newDocument, openFiles, readMode, save, saveAs, savePdf],
   );
 
   // Ctrl + mouse wheel (or a touchpad pinch) zooms, in steps of 10%.
@@ -960,6 +1104,12 @@ export const DesktopApp: React.FC = () => {
 
   const openWithPassword = async (path: string, password: string) => {
     try {
+      if (isPdfPath(path)) {
+        addPdf(await pdf.open(path, password));
+        setDialog(null);
+        remember(path);
+        return;
+      }
       const state = await engine.open(path, password);
       setDialog(null);
       docsRef.current = [...docsRef.current, state];
@@ -990,6 +1140,10 @@ export const DesktopApp: React.FC = () => {
   latestHandlers.current = { openPaths, onCommand, onAction: (a) => void onAction(a), onMore: (a) => void onMore(a), onZoom };
 
   const insertSignature = (png: string, widthPt: number) => {
+    if (activePdf) {
+      pdfView.current?.placeSignature(png, widthPt);
+      return;
+    }
     // In line with the text at the cursor, like a typed word; right-click to float it.
     void view.current?.commands([['insert.picture', { data: png, width: widthPt, alt: t.signature }]]);
   };
@@ -1022,8 +1176,8 @@ export const DesktopApp: React.FC = () => {
           </span>
         </div>
         <span className="h-5 w-px bg-slate-200" />
-        <span data-tauri-drag-region className="min-w-0 truncate text-[13px] font-medium text-slate-700" title={active?.path ?? active?.name}>
-          {active?.name}
+        <span data-tauri-drag-region className="min-w-0 truncate text-[13px] font-medium text-slate-700" title={(active ?? activePdf)?.path ?? (active ?? activePdf)?.name}>
+          {(active ?? activePdf)?.name}
         </span>
         <div data-tauri-drag-region className="ml-auto flex items-center gap-1.5">
           <button
@@ -1061,8 +1215,8 @@ export const DesktopApp: React.FC = () => {
           </button>
           <button
             type="button"
-            disabled={!active}
-            onClick={() => active && void save(active)}
+            disabled={!active && !activePdf}
+            onClick={() => (active ? void save(active) : activePdf && void savePdf(activePdf, false))}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#083B69] px-3 text-[13px] font-medium text-white hover:bg-[#0B4A84] disabled:opacity-40"
           >
             <Save className="h-4 w-4" /> {t.save}
@@ -1112,17 +1266,20 @@ export const DesktopApp: React.FC = () => {
         </div>
       ) : (
       <div ref={tabBar} className="lithora-slim-scroll flex h-9 shrink-0 items-end gap-1 overflow-x-auto border-b border-slate-200 bg-[#EEF1F6] px-2 select-none">
-        {docs.map((d) => (
+        {tabs.map((tab) => (
           <div
-            key={d.id}
+            key={tab.id}
             onMouseDown={(e) => {
               if (e.button === 1) {
                 e.preventDefault();
-                void closeDoc(d);
+                if (tab.doc) void closeDoc(tab.doc);
+                else if (tab.info) void closePdf(tab.info);
               }
             }}
             onPointerDown={(e) => {
-              if (e.button !== 0 || docs.length < 2 || (e.target as HTMLElement).closest('button')) return;
+              // PDF tabs stay in this window; documents can be dragged out into a window of their own.
+              const d = tab.doc;
+              if (!d || e.button !== 0 || docs.length < 2 || (e.target as HTMLElement).closest('button')) return;
               e.currentTarget.setPointerCapture(e.pointerId);
               const start = { x: e.clientX, y: e.clientY };
               const el = e.currentTarget;
@@ -1144,21 +1301,22 @@ export const DesktopApp: React.FC = () => {
               el.addEventListener('pointercancel', up);
             }}
             className={`group flex h-8 max-w-[220px] shrink-0 cursor-default items-center gap-2 rounded-t-md border-x border-t px-3 text-[13px] ${
-              d.id === activeId ? 'border-slate-200 bg-white text-[#083B69]' : 'border-transparent text-slate-600 hover:bg-white/60'
+              tab.id === activeId ? 'border-slate-200 bg-white text-[#083B69]' : 'border-transparent text-slate-600 hover:bg-white/60'
             }`}
-            onClick={() => setActiveId(d.id)}
-            title={d.path ?? d.name}
+            onClick={() => setActiveId(tab.id)}
+            title={tab.path ?? tab.name}
           >
-            <FileText className="h-3.5 w-3.5 shrink-0 text-[#376FA3]" />
-            <span className="truncate">{d.name}</span>
-            {d.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#376FA3]" title={t.unsaved} />}
+            {tab.info ? <FileType2 className="h-3.5 w-3.5 shrink-0 text-[#B4463C]" /> : <FileText className="h-3.5 w-3.5 shrink-0 text-[#376FA3]" />}
+            <span className="truncate">{tab.name}</span>
+            {tab.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#376FA3]" title={t.unsaved} />}
             <button
               type="button"
               title={t.closeTab}
-              aria-label={`${t.closeTab} ${d.name}`}
+              aria-label={`${t.closeTab} ${tab.name}`}
               onClick={(e) => {
                 e.stopPropagation();
-                void closeDoc(d);
+                if (tab.doc) void closeDoc(tab.doc);
+                else if (tab.info) void closePdf(tab.info);
               }}
               className="rounded p-0.5 text-slate-400 opacity-60 hover:bg-slate-200 hover:text-slate-700 group-hover:opacity-100"
             >
@@ -1178,7 +1336,26 @@ export const DesktopApp: React.FC = () => {
       </div>
       )}
 
-      {!readMode && (
+      {activePdf && (
+        <PdfToolbar
+          t={t}
+          info={activePdf}
+          sel={pdfSel}
+          tool={pdfTool}
+          fonts={pdfFontList}
+          onTool={setPdfTool}
+          onUndo={() => pdfView.current?.undo()}
+          onRedo={() => pdfView.current?.redo()}
+          onStyle={(change) => pdfView.current?.style(change)}
+          onDelete={() => pdfView.current?.deleteSelected()}
+          onSign={() => setDialog({ kind: 'signature' })}
+          onFonts={() => setDialog({ kind: 'pdfFonts' })}
+          onPrint={() => setDialog({ kind: 'print' })}
+          onSaveAs={() => void savePdf(activePdf, true)}
+        />
+      )}
+
+      {!readMode && !activePdf && (
       <Ribbon
         t={t}
         doc={ribbonDoc}
@@ -1208,7 +1385,51 @@ export const DesktopApp: React.FC = () => {
         />
       )}
 
-      {active ? (
+      {activePdf ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {activePdf.missingFonts > 0 && !fontNoticeClosed[activePdf.id] && (
+            <div className="flex shrink-0 items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[13px] text-amber-900">
+              <TriangleAlert className="h-4 w-4 shrink-0 text-amber-600" />
+              <span className="min-w-0 flex-1">
+                {activePdf.missingFonts === 1 ? t.pdfMissingOne : t.pdfMissingMany.replace('{n}', String(activePdf.missingFonts))}
+              </span>
+              <button
+                type="button"
+                onClick={() => setDialog({ kind: 'pdfFonts' })}
+                className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1 text-[12px] font-medium text-amber-900 hover:bg-amber-100"
+              >
+                {t.pdfShowFonts}
+              </button>
+              <button
+                type="button"
+                aria-label={t.close}
+                title={t.close}
+                onClick={() => setFontNoticeClosed((all) => ({ ...all, [activePdf.id]: true }))}
+                className="shrink-0 rounded p-1 text-amber-700 hover:bg-amber-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          <PdfView
+            key={activePdf.id}
+            ref={pdfView}
+            t={t}
+            info={activePdf}
+            zoom={zoom}
+            tool={pdfTool}
+            onTool={setPdfTool}
+            onInfo={updatePdf}
+            onError={showError}
+            onNotice={(text) => setNotice({ text })}
+            onShortcut={shortcut}
+            onCurrentPage={setCurrentPage}
+            onSelection={setPdfSel}
+            onMenu={(x, y, items) => setMenu({ x, y, items })}
+            onShowFonts={() => setDialog({ kind: 'pdfFonts' })}
+          />
+        </div>
+      ) : active ? (
         <div className="flex min-h-0 flex-1">
           {navOpen && !readMode && <NavPane t={t} doc={active} onGo={goToHeading} onClose={() => setNavOpen(false)} />}
           <PageView
@@ -1265,6 +1486,15 @@ export const DesktopApp: React.FC = () => {
 
       {/* Status bar */}
       <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-slate-200 bg-white px-4 text-[12px] text-slate-600 select-none">
+        {activePdf && (
+          <>
+            <span>
+              {t.page} {Math.min(currentPage + 1, activePdf.pages.length)} {t.of} {activePdf.pages.length}
+            </span>
+            <span className={activePdf.dirty ? 'text-[#376FA3]' : 'text-emerald-700'}>{activePdf.dirty ? t.unsaved : t.saved}</span>
+            <span className="text-slate-400">{pdfTool === 'text' ? t.pdfAddTextHint : t.pdfEditHint}</span>
+          </>
+        )}
         {active && (
           <>
             <span>
@@ -1330,6 +1560,39 @@ export const DesktopApp: React.FC = () => {
         </div>
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {dialog?.kind === 'print' && activePdf && (
+        <PrintDialog
+          t={t}
+          docId={activePdf.id}
+          hasSelection={false}
+          currentPage={currentPage}
+          onClose={() => setDialog(null)}
+          onDone={(text, error) => setNotice({ text, error })}
+          print={async (opts) => {
+            await pdfView.current?.settle();
+            return pdf.print(activePdf.id, opts);
+          }}
+        />
+      )}
+      {dialog?.kind === 'pdfFonts' && activePdf && (
+        <PdfFontsDialog
+          t={t}
+          info={activePdf}
+          onClose={() => {
+            setDialog(null);
+            pdfView.current?.focus();
+          }}
+          onChanged={(info) => {
+            updatePdf(info);
+            pdfView.current?.redrawAll();
+            pdf
+              .installedFonts()
+              .then(setPdfFontList)
+              .catch(() => undefined);
+          }}
+          onNotice={(text, error) => setNotice({ text, error })}
+        />
+      )}
       {dialog?.kind === 'print' && active && (
         <PrintDialog
           t={t}

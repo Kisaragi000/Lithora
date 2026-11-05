@@ -62,6 +62,16 @@ under the SIL Open Font License 1.1. They ship inside Lithora through the Fontso
 packages (`@fontsource/plus-jakarta-sans`, `@fontsource/sora`, `@fontsource/noto-sans-armenian`),
 whose LICENSE files hold the full license text.
 
+## PDF editing
+
+PDF files are read and written with lopdf (MIT) and drawn with hayro (Apache-2.0 OR MIT, by
+Laurenz Stampfl). The character tables in `src-tauri/src/pdf/tables.rs` were generated from
+hayro-font's tables (Apache-2.0 OR MIT), which come from Apache PDFBox (Apache-2.0), the Adobe
+Glyph List (BSD-3-Clause) and Adobe's font metrics for the 14 standard PDF fonts (Copyright
+1985-1997 Adobe Systems Incorporated; "may be used, copied, and distributed for any purpose and
+without charge, with or without modification, provided that all copyright notices are
+retained").
+
 ## Rust and JavaScript libraries
 
 Lithora is also built from about 670 Rust crates (including Tauri and the krilla PDF library)

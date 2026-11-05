@@ -1,4 +1,5 @@
 mod engine;
+mod pdf;
 mod print;
 mod proofread;
 mod recovery;
@@ -35,6 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(window_layout::plugin())
         .manage(engine::EngineState::default())
+        .manage(pdf::PdfState::default())
         .invoke_handler(tauri::generate_handler![
             engine::engine_open,
             window_layout::open_doc_window,
@@ -59,6 +61,27 @@ pub fn run() {
             engine::engine_compare,
             engine::engine_thesaurus,
             engine::startup_files,
+            pdf::pdf_open,
+            pdf::pdf_close,
+            pdf::pdf_state,
+            pdf::pdf_render_page,
+            pdf::pdf_page_items,
+            pdf::pdf_set_text,
+            pdf::pdf_style_text,
+            pdf::pdf_move_text,
+            pdf::pdf_add_text,
+            pdf::pdf_delete_text,
+            pdf::pdf_place_graphic,
+            pdf::pdf_add_stamp,
+            pdf::pdf_place_stamp,
+            pdf::pdf_undo,
+            pdf::pdf_redo,
+            pdf::pdf_save,
+            pdf::pdf_fonts,
+            pdf::pdf_replace_font,
+            pdf::pdf_print,
+            pdf::fonts_add_file,
+            pdf::fonts_installed,
             proofread::engine_proofread,
             proofread::engine_proofread_fix,
             print::print_printers,
@@ -111,6 +134,11 @@ fn setup_engine(app: &tauri::AppHandle) {
         let user_dict = data.join("custom-dictionary.txt");
         let _ = std::fs::create_dir_all(&data);
         wordcraft_engine::proof::load_user_dictionary(&user_dict);
+        // Fonts added in Lithora (Missing fonts › Find font file…) are kept here for next time.
+        let fonts_dir = data.join("fonts");
+        std::thread::spawn(move || {
+            wordcraft_fonts::FontDb::global().load_user_fonts(&fonts_dir);
+        });
         let recovery_dir = data.join("recovery");
         let _ = std::fs::create_dir_all(&recovery_dir);
         if let Ok(mut docs) = app.state::<engine::EngineState>().lock() {
