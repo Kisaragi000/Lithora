@@ -502,8 +502,14 @@ export const DesktopApp: React.FC = () => {
       if (opened === 0) {
         const blank = await newDocument();
         loadFonts(blank.id);
-      } else {
+      } else if (docsRef.current[0]) {
         loadFonts(docsRef.current[0].id);
+      } else {
+        // Only PDFs were opened: the installed fonts, for the first new document.
+        pdf
+          .installedFonts()
+          .then((list) => setFonts([...new Set(list)].sort((a, b) => a.localeCompare(b))))
+          .catch(() => undefined);
       }
       // Documents Lithora kept copies of when it last closed without saving them.
       const left = await engine.recoveryList().catch(() => [] as RecoveredDoc[]);

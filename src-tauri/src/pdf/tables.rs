@@ -1,6 +1,8 @@
 //! Character tables for simple PDF fonts: the standard encodings (code → Unicode) and the
-//! Adobe Glyph List (glyph name → Unicode), and the widths of the 14 standard fonts. Generated from hayro-font's tables (Apache-2.0 OR
-//! MIT), which come from Apache PDFBox and the Adobe Glyph List (BSD-3-Clause).
+//! Adobe Glyph List (glyph name → Unicode), and the widths of the 14 standard fonts. Generated
+//! from hayro-font's tables (Apache-2.0 OR MIT), which come from Apache PDFBox, the Adobe Glyph
+//! List (BSD-3-Clause) and Adobe's Core 14 font metrics (Copyright 1985-1997 Adobe Systems
+//! Incorporated, free to use, copy and distribute with the copyright notices kept).
 
 #![allow(clippy::unreadable_literal)]
 

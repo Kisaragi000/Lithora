@@ -3,6 +3,31 @@
 Each version's notes also appear on its [release page](https://github.com/Kisaragi000/Lithora/releases)
 and in Lithora's update prompt.
 
+## 0.6.0
+
+**Open, edit and sign PDFs**
+- Open a PDF like any document (drop it on the window, or File > Open). It opens in its own
+  tab, drawn exactly as the PDF is.
+- Click a line to change its text. Lithora keeps the PDF's own font, size and colour, and
+  everything else on the page stays where it was. Bold, italic, underline, colour, size and
+  font can be changed for the line or for selected letters.
+- Click a picture or shape to move it, resize it from its handles, or delete it. Arrow keys
+  nudge it.
+- Add text anywhere with the Add text tool, and place your saved signature with Sign.
+- A Fonts panel, like the Missing Fonts dialogs of InDesign and Photoshop, lists every font
+  the PDF uses and how it stands: missing, in the PDF (all of it or only the letters used),
+  a standard PDF font, or installed. A missing font can be found (pick its font file, which
+  Lithora keeps for next time) or replaced with an installed font; the page is drawn in it at
+  once, and saving puts that font into the PDF so other PDF readers show it the same way.
+- When a PDF uses fonts this computer doesn't have, a notice says so, and the Fonts button
+  shows how many.
+- New letters a PDF's font doesn't hold (PDFs often keep only the letters they use) are drawn
+  in a similar installed font, and the line says which font is missing.
+- Save As writes the original file with the changes added, so bookmarks, links and forms are
+  kept. Undo and Redo work across saves.
+- Print a PDF, with copies and page ranges, from its tab.
+- Password-protected PDFs open with their password and are saved with it.
+
 ## 0.5.6
 
 - Proofread messages now appear in the interface's language (English, Russian or Armenian),

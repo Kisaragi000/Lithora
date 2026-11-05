@@ -282,6 +282,8 @@ pub struct PdfFont {
     pub italic: bool,
     pub serif: bool,
     pub mono: bool,
+    /// The descriptor's flags.
+    pub flags: i64,
     pub kind: Kind,
     pub embedded: Embedded,
     /// One of the 14 fonts every PDF reader has, named exactly, and not in the file.
@@ -563,6 +565,7 @@ impl PdfFont {
             italic,
             serif: flags & (1 << 1) != 0,
             mono: flags & 1 != 0,
+            flags,
             kind,
             embedded,
             builtin,

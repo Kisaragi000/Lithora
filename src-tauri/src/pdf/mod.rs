@@ -6,6 +6,7 @@
 //! so each one can be undone; saving appends them to the original file (see [`write`]).
 
 mod edit;
+mod embed;
 mod font;
 mod read;
 mod render;
@@ -63,6 +64,8 @@ pub struct PdfDoc {
     /// The file with the edits, for drawing; rebuilt when the edits change.
     current: Arc<Vec<u8>>,
     stale: bool,
+    /// The font list's version `current` was made with.
+    font_generation: u64,
 }
 
 #[derive(Serialize)]
@@ -97,7 +100,8 @@ fn info(id: u32, d: &PdfDoc) -> PdfInfo {
         can_undo: !d.undo.is_empty(),
         can_redo: !d.redo.is_empty(),
         encrypted: d.encrypted,
-        missing_fonts: font_reports(d).iter().filter(|f| f.status == font::FontStatus::Missing).count(),
+        // A missing font the user chose a replacement for is dealt with.
+        missing_fonts: font_reports(d).iter().filter(|f| f.status == font::FontStatus::Missing && !f.replaced).count(),
     }
 }
 
@@ -163,7 +167,9 @@ fn open_bytes(name: String, path: Option<PathBuf>, bytes: Vec<u8>, password: Opt
         redo: Vec::new(),
         repl: HashMap::new(),
         current: base,
-        stale: false,
+        // Fonts of this computer may go into the copy that is drawn.
+        stale: true,
+        font_generation: 0,
     })
 }
 
@@ -178,26 +184,47 @@ impl PdfDoc {
         Ok(&self.models[&page])
     }
 
-    fn source(&self) -> write::Source<'_> {
-        write::Source { doc: &self.doc, pages: &self.pages, models: &self.models, fonts: &self.fonts, repl: &self.repl }
+    fn source(&self, for_file: bool) -> write::Source<'_> {
+        write::Source { doc: &self.doc, pages: &self.pages, models: &self.models, fonts: &self.fonts, repl: &self.repl, embed: self.font_files(), for_file }
+    }
+
+    /// The fonts the PDF names but doesn't hold that are drawn in a font of this computer: the
+    /// one the user chose, or the font itself when it is installed (or was found). That font
+    /// goes into the PDF, so the page shows it and other readers show it too.
+    fn font_files(&self) -> Vec<(usize, String)> {
+        self.fonts
+            .list
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.embedded == font::Embedded::No && f.kind == font::Kind::Simple)
+            .filter_map(|(k, f)| match self.repl.get(&k) {
+                Some(r) => Some((k, r.clone())),
+                None if !f.builtin => font::installed_family(f).map(|i| (k, i)),
+                None => None,
+            })
+            .collect()
     }
 
     /// The file with the edits applied.
     fn current(&mut self) -> Result<Arc<Vec<u8>>, String> {
-        if self.stale {
-            let objects = write::objects(&self.source(), &self.edits)?;
-            self.current = Arc::new(write::append(&self.base, &self.doc.trailer, &objects, None)?);
+        // A font added since is drawn too.
+        let generation = wordcraft_fonts::FontDb::global().generation();
+        if self.stale || generation != self.font_generation {
+            let objects = write::objects(&self.source(false), &self.edits)?;
+            self.current = if objects.is_empty() { self.base.clone() } else { Arc::new(write::append(&self.base, &self.doc.trailer, &objects, None)?) };
             self.stale = false;
+            self.font_generation = generation;
         }
         Ok(self.current.clone())
     }
 
     /// Bytes to write to disk.
     fn file_bytes(&mut self) -> Result<Vec<u8>, String> {
-        if self.edits.texts.is_empty() && self.edits.graphics.is_empty() && self.edits.stamps.is_empty() {
+        // Unchanged, and no font replaced: the file as it was.
+        if self.edits.texts.is_empty() && self.edits.graphics.is_empty() && self.edits.stamps.is_empty() && self.repl.is_empty() {
             return Ok(self.original.as_ref().clone());
         }
-        let objects = write::objects(&self.source(), &self.edits)?;
+        let objects = write::objects(&self.source(true), &self.edits)?;
         if !self.encrypted {
             return write::append(&self.base, &self.doc.trailer, &objects, None);
         }

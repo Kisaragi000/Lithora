@@ -90,7 +90,7 @@ export function PdfFontsDialog({
     <Modal
       title={t.pdfFontsTitle}
       onClose={onClose}
-      width="w-[720px]"
+      width="w-[780px]"
       footer={
         <>
           <button
@@ -132,14 +132,12 @@ export function PdfFontsDialog({
                     <span className="font-medium text-slate-800">{f.name}</span>
                     <span className={`rounded border px-1.5 py-px text-[11px] font-medium ${STATUS_STYLE[f.status]}`}>{statusLabel(t, f.status)}</span>
                   </div>
-                  <div className="mt-0.5 text-[12px] text-slate-500">
-                    {statusHelp(t, f)}
-                    {f.pages.length > 0 && (
-                      <span className="ml-1 text-slate-400">
-                        · {t.pdfPagesUsed}: {f.pages.length > 8 ? `${f.pages.slice(0, 8).join(', ')}…` : f.pages.join(', ')}
-                      </span>
-                    )}
-                  </div>
+                  <div className="mt-0.5 text-[12px] text-slate-500">{statusHelp(t, f)}</div>
+                  {f.pages.length > 0 && (
+                    <div className="text-[11.5px] text-slate-400">
+                      {t.pdfPagesUsed}: {f.pages.length > 12 ? `${f.pages.slice(0, 12).join(', ')}…` : f.pages.join(', ')}
+                    </div>
+                  )}
                 </div>
                 {canReplace && (
                   <label className="flex shrink-0 flex-col gap-0.5 text-[11px] text-slate-500">
@@ -147,7 +145,7 @@ export function PdfFontsDialog({
                     <select
                       value={f.replaced ? f.replacement : ''}
                       onChange={(e) => void replace(f, e.target.value || null)}
-                      className="h-8 w-48 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 focus:border-[#376FA3] focus:outline-none"
+                      className="h-8 w-60 rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 focus:border-[#376FA3] focus:outline-none"
                     >
                       <option value="">{f.replaced ? t.pdfAutomatic.replace(/\s*\(\{font\}\)/, '') : t.pdfAutomatic.replace('{font}', f.replacement)}</option>
                       {installed.map((name) => (

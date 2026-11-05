@@ -412,6 +412,10 @@ pub struct Source<'a> {
     pub models: &'a HashMap<usize, PageModel>,
     pub fonts: &'a Fonts,
     pub repl: &'a Replacements,
+    /// Fonts to put a font file into, and the family (see [`super::embed`]).
+    pub embed: Vec<(usize, String)>,
+    /// For the file on disk, not for drawing.
+    pub for_file: bool,
 }
 
 /// The objects that change, and the new ones, for `edits`.
@@ -582,6 +586,8 @@ pub fn objects(src: &Source, edits: &Edits) -> Result<Vec<(ObjectId, Object)>, S
         page.set("Resources", Object::Dictionary(res));
         out.push((page_id, Object::Dictionary(page)));
     }
+    // Fonts drawn in a font of this computer get its file.
+    out.extend(super::embed::font_objects(&src.fonts.list, &src.embed, src.for_file, &mut next));
     Ok(out)
 }
 

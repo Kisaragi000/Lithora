@@ -7,7 +7,7 @@
 <p align="center">
   <strong>A free and open source word processor for Windows and Linux.</strong><br>
   Open, edit and save Word (.docx, .doc), RTF, OpenDocument (.odt), HTML, Markdown and text files,<br>
-  export PDF, and write in English, Russian and Armenian.
+  edit and sign PDFs, and write in English, Russian and Armenian.
 </p>
 
 <p align="center">
@@ -55,6 +55,16 @@ installs and restarts the app. See what changed in each version in [CHANGELOG.md
 - Saves Word (.docx and .doc), RTF, OpenDocument, HTML, Markdown and text, and exports PDF.
 - Keeps page layout, tables, columns, headers and footers as close to Word as it can.
 - Armenian and Cyrillic text survives the trip through RTF and Word unchanged.
+
+**PDF**
+- Open a PDF and edit its text in place: the PDF's own font, size and colour are kept, and
+  the rest of the page stays exactly as it was.
+- Move, resize or delete pictures and shapes, add new text, and sign.
+- A Fonts panel, like the Missing Fonts dialogs of InDesign and Photoshop, lists every font
+  the PDF uses. A missing font can be found (pick its font file) or replaced with an
+  installed one.
+- Save As keeps the original file and adds the changes, so everything else in the PDF
+  (bookmarks, forms, links) is left alone.
 
 **Writing**
 - A Word-style ribbon (File, Home, Insert, Design, Layout, References, Review and View), with
@@ -171,5 +181,6 @@ other products are used only to describe the file formats Lithora opens and save
 
 Lithora's document engine is built on [WordCraft](https://github.com/storytold/wordcraft)
 (MIT OR Apache-2.0), and printing on its craft-print crate. English grammar checking uses [Harper](https://github.com/Automattic/harper)
-(Apache-2.0). The Russian and Armenian dictionaries, the fonts and the other bundled code
+(Apache-2.0). PDFs are read and written with [lopdf](https://github.com/J-F-Liu/lopdf) (MIT) and drawn
+with [hayro](https://github.com/LaurenzV/hayro) (Apache-2.0 OR MIT). The Russian and Armenian dictionaries, the fonts and the other bundled code
 are listed with their licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -235,3 +235,60 @@ fn font_names_read_as_families() {
     assert_eq!(family_and_style("SourceSans3-Bold"), ("Source Sans 3".to_string(), true, false));
     assert_eq!(family_and_style("PTSans-Italic"), ("PT Sans".to_string(), false, true));
 }
+
+/// A PDF whose text font is named but not in the file (and not on any computer).
+fn missing_font_pdf() -> Vec<u8> {
+    let widths: Vec<String> = (32..256).map(|c| if c == 32 { "250".to_string() } else { "520".to_string() }).collect();
+    let content = "BT /F1 14 Tf 72 700 Td (Body text in a missing font.) Tj ET";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        format!("<< /Type /Font /Subtype /TrueType /BaseFont /NoSuchFontPro-Book /FirstChar 32 /LastChar 255 /Widths [{}] /Encoding /WinAnsiEncoding /FontDescriptor 6 0 R >>", widths.join(" ")),
+        "<< /Type /FontDescriptor /FontName /NoSuchFontPro-Book /Flags 32 /FontBBox [-100 -250 1100 950] /ItalicAngle 0 /Ascent 900 /Descent -250 /CapHeight 700 /StemV 80 >>".to_string(),
+    ];
+    let mut data = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(data.len());
+        data.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = data.len();
+    data.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        data.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    data.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    data
+}
+
+fn drawn(d: &mut PdfDoc) -> Vec<u8> {
+    let pdf = hayro::hayro_syntax::Pdf::new(d.current().unwrap()).unwrap();
+    render::draw(&pdf, 0, 1.0, None, &render::settings(HashMap::new())).unwrap().4
+}
+
+#[test]
+fn a_replaced_font_is_drawn_and_saved() {
+    let mut d = open_bytes("t.pdf".into(), None, missing_font_pdf(), None).unwrap();
+    let report = font_reports(&d);
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].name, "No Such Font Pro Book");
+    assert_eq!(report[0].status, font::FontStatus::Missing);
+    assert_eq!(info(1, &d).missing_fonts, 1);
+    let before = drawn(&mut d);
+    d.repl.insert(report[0].key, "Source Serif 4".into());
+    d.stale = true;
+    let after = drawn(&mut d);
+    assert_ne!(before, after, "the page should be drawn in the chosen font");
+    // Chosen: no longer counted as missing.
+    assert_eq!(info(1, &d).missing_fonts, 0);
+    // Saved with the font in it, and the text as it was.
+    let saved = d.file_bytes().unwrap();
+    let mut again = open_bytes("t.pdf".into(), None, saved, None).unwrap();
+    let report = font_reports(&again);
+    assert_eq!(report[0].embedded, font::Embedded::Full, "{:?}", report[0].name);
+    assert!(report[0].name.starts_with("Source Serif"), "{}", report[0].name);
+    assert_eq!(texts(&mut again, 0), vec!["Body text in a missing font."]);
+    assert_eq!(drawn(&mut again), after);
+}
