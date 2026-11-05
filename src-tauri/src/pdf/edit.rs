@@ -223,7 +223,7 @@ fn face_for(style: &EStyle, fonts: &[PdfFont], repl: &Replacements, c: char) -> 
         FontChoice::Family { name, bold, italic } => (name.clone(), *bold, *italic),
         FontChoice::Pdf(k) => {
             let f = &fonts[*k];
-            let fam = repl.get(k).cloned().or_else(|| super::font::installed_family(f)).unwrap_or_else(|| f.family.clone());
+            let fam = repl.get(k).cloned().unwrap_or_else(|| super::font::substitute_family(f));
             (fam, f.bold, f.italic)
         }
     };

@@ -355,24 +355,36 @@ pub fn family_and_style(ps: &str) -> (String, bool, bool) {
         || lower.ends_with("bold")
         || lower.ends_with("bd");
     let italic = ["italic", "oblique", "ital"].iter().any(|w| style.contains(w)) || lower.ends_with("italic") || style == "it";
+    // "PSMT", "PS" and "MT" belong to the PostScript name only ("ArialMT" is Arial); "Pro" and
+    // "Std" are part of the family ("Minion Pro").
     let mut base = base.to_string();
-    for suffix in ["PSMT", "PS", "MT", "Std", "Pro", "LT"] {
+    for suffix in ["PSMT", "PS", "MT"] {
         if base.len() > suffix.len() + 2 && base.ends_with(suffix) {
             base.truncate(base.len() - suffix.len());
+            break;
         }
     }
-    // "TimesNewRoman" → "Times New Roman", "SourceSans3" → "Source Sans 3": a space before each
-    // capital or digit that follows a lowercase letter.
-    let mut family = String::new();
-    let mut prev: Option<char> = None;
-    for c in base.chars() {
-        if (c.is_ascii_uppercase() || c.is_ascii_digit()) && prev.is_some_and(|p| p.is_ascii_lowercase()) {
-            family.push(' ');
+    // "TimesNewRoman" → "Times New Roman", "SourceSans3" → "Source Sans 3", "HelveticaNeueLTStd"
+    // → "Helvetica Neue LT Std": a space before each capital or digit that follows a lowercase
+    // letter, and before the capital that starts a word after a run of capitals.
+    (spaced(&base), bold, italic)
+}
+
+/// "TimesNewRoman" → "Times New Roman" (see [`family_and_style`]).
+fn spaced(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        let prev = i.checked_sub(1).map(|j| chars[j]);
+        let next = chars.get(i + 1).copied();
+        let after_lower = prev.is_some_and(|p| p.is_ascii_lowercase()) && (c.is_ascii_uppercase() || c.is_ascii_digit());
+        let word_after_caps = c.is_ascii_uppercase() && prev.is_some_and(|p| p.is_ascii_uppercase()) && next.is_some_and(|n| n.is_ascii_lowercase());
+        if after_lower || word_after_caps {
+            out.push(' ');
         }
-        family.push(c);
-        prev = Some(c);
+        out.push(c);
     }
-    (family, bold, italic)
+    out
 }
 
 /// The standard font a PostScript name stands for, and whether it names it exactly
@@ -634,12 +646,25 @@ impl PdfFont {
     }
 
     /// A name for lists: "Calibri Bold".
+    /// The font as people name it: "Futura Book", "Garamond Premr Pro Bold", "Arial".
     pub fn display_name(&self) -> String {
         let mut n = self.family.clone();
-        if self.bold && !n.to_ascii_lowercase().contains("bold") {
+        // The style the PostScript name gives ("Futura-Book", "Calibri-BoldItalic"), without
+        // the words that only mean the plain style.
+        let style = self.ps_name.split_once(['-', ',']).map(|(_, s)| s).unwrap_or("");
+        let style = style.strip_suffix("MT").unwrap_or(style);
+        for word in spaced(style).split_whitespace() {
+            let w = word.to_ascii_lowercase();
+            if !["regular", "roman", "normal", "plain"].contains(&w.as_str()) && !n.to_ascii_lowercase().split_whitespace().any(|x| x == w) {
+                n.push(' ');
+                n.push_str(word);
+            }
+        }
+        let lower = n.to_ascii_lowercase();
+        if self.bold && !["bold", "black", "heavy", "semibold", "demi"].iter().any(|w| lower.contains(w)) {
             n.push_str(" Bold");
         }
-        if self.italic && !n.to_ascii_lowercase().contains("italic") {
+        if self.italic && !["italic", "oblique"].iter().any(|w| lower.contains(w)) {
             n.push_str(" Italic");
         }
         n
@@ -802,10 +827,46 @@ pub fn font_status(font: &PdfFont) -> FontStatus {
     }
 }
 
-/// Family names the font goes by, best first: its family, then its PostScript name.
+/// The installed family a font is, if it is installed: by its family, its PostScript name, or
+/// its family without a packaging word ("Helvetica Neue LT Std" is Helvetica Neue).
 pub fn installed_family(font: &PdfFont) -> Option<String> {
+    installed_as(&font.family, &font.ps_name)
+}
+
+pub fn installed_as(family: &str, ps_name: &str) -> Option<String> {
     let db = wordcraft_fonts::FontDb::global();
-    [font.family.clone(), font.ps_name.clone(), font.family.replace(' ', "")]
-        .into_iter()
-        .find(|n| !n.is_empty() && db.has_family(n))
+    let mut names = vec![family.to_string(), ps_name.to_string(), family.replace(' ', "")];
+    for suffix in [" LT Std", " LT Pro", " Std", " Pro", " LT"] {
+        if let Some(short) = family.strip_suffix(suffix).filter(|s| s.len() > 2) {
+            names.push(short.to_string());
+        }
+    }
+    names.into_iter().filter(|n| !n.is_empty()).find_map(|n| if db.has_family(&n) { Some(n) } else { known_family(&n) })
+}
+
+/// What a font the computer lacks is drawn in (letters the PDF's copy lacks, or all of it when
+/// the PDF doesn't hold it): the font itself when installed, a look-alike with the same letter
+/// widths for the fonts that have one (Arial → Liberation Sans), else a font of the same kind
+/// (serif, sans or monospaced).
+pub fn substitute_family(font: &PdfFont) -> String {
+    if let Some(f) = installed_family(font) {
+        return f;
+    }
+    let resolve = |family: &str| wordcraft_fonts::word::resolve(family, font.bold, font.italic).face.get().family.clone();
+    if font.builtin || wordcraft_fonts::word::has_named_substitutes(&font.family) {
+        return resolve(&font.family);
+    }
+    let lower = font.family.to_ascii_lowercase();
+    let serif_name = ["serif", "roman", "garamond", "times", "georgia", "minion", "caslon", "baskerville", "bodoni", "palatino", "book antiqua", "cambria", "didot", "century", "bookman", "cochin", "mincho", "song"]
+        .iter()
+        .any(|w| lower.contains(w))
+        && !lower.contains("sans");
+    let mono_name = ["mono", "courier", "consol", "code", "typewriter"].iter().any(|w| lower.contains(w));
+    if font.mono || mono_name {
+        resolve("Courier New")
+    } else if font.serif || serif_name {
+        resolve("Times New Roman")
+    } else {
+        resolve("Arial")
+    }
 }

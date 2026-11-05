@@ -25,8 +25,9 @@ pub(crate) fn fixture() -> Vec<u8> {
     s.set_fill(Some(fill(0, 0, 0)));
     s.draw_text(Point::from_xy(72.0, 160.0), sans_f.clone(), 12.0, "Привет, мир.", false, TextDirection::Auto);
     // Source Sans has no Armenian letters: those come from an installed font that has them.
-    let hy = db.fallback_for('Բ', 0).expect("an Armenian font");
-    s.draw_text(Point::from_xy(72.0, 180.0), font(&hy), 12.0, "Բարև աշխարհ.", false, TextDirection::Auto);
+    if let Some(hy) = db.fallback_for('Բ', 0) {
+        s.draw_text(Point::from_xy(72.0, 180.0), font(&hy), 12.0, "Բարև աշխարհ.", false, TextDirection::Auto);
+    }
     s.set_fill(Some(fill(200, 40, 40)));
     let mut pb = PathBuilder::new();
     pb.push_rect(Rect::from_xywh(72.0, 200.0, 100.0, 60.0).unwrap());
@@ -44,7 +45,12 @@ fn texts(d: &mut PdfDoc, page: usize) -> Vec<String> {
 fn reads_lines_of_a_pdf() {
     let mut d = open_bytes("t.pdf".into(), None, fixture(), None).unwrap();
     let t = texts(&mut d, 0);
-    assert_eq!(t, vec!["Quarterly Report", "Sales grew by 12 percent in the north region.", "Привет, мир.", "Բարև աշխարհ."], "{t:?}");
+    let mut want = vec!["Quarterly Report", "Sales grew by 12 percent in the north region.", "Привет, мир."];
+    // Armenian, where this computer has a font for it.
+    if wordcraft_fonts::FontDb::global().fallback_for('Բ', 0).is_some() {
+        want.push("Բարև աշխարհ.");
+    }
+    assert_eq!(t, want, "{t:?}");
     let items = page_items(&mut d, 0).unwrap();
     assert_eq!(items.graphics.len(), 1);
     let head = &items.texts[0];
@@ -176,6 +182,19 @@ fn real_files() {
             println!("   graphic {} {:?} {:.0}x{:.0} at ({:.0},{:.0})", g.id, g.kind, g.width, g.height, g.x, g.y);
         }
         png(&mut d, page, &out.join(format!("{stem}-before.png")));
+        {
+            // How long drawing takes: the whole page, and a strip around one line (as when typing).
+            let bytes = d.current().unwrap();
+            let pdf = hayro::hayro_syntax::Pdf::new(bytes).unwrap();
+            let settings = render::settings(HashMap::new());
+            let t = std::time::Instant::now();
+            render::draw(&pdf, page, 2.0, None, &settings).unwrap();
+            let full = t.elapsed();
+            let l = &items.texts[0];
+            let t = std::time::Instant::now();
+            render::draw(&pdf, page, 2.0, Some([l.x - 4.0, l.y - 4.0, l.width + 60.0, l.height + 8.0]), &settings).unwrap();
+            println!("  drawn at 2x: whole page {full:?}, one line {:?}", t.elapsed());
+        }
         let first = items.texts.iter().find(|t| t.text.chars().count() > 4 && t.editable).expect("a line to edit");
         let key = parse_key(&first.key).unwrap();
         let new_text = match first.text.split_once(' ') {
@@ -204,4 +223,15 @@ fn real_files() {
         png(&mut again, page, &out.join(format!("{stem}-reopened.png")));
         println!("  saved to {} and reopened: ok", path.display());
     }
+}
+
+#[test]
+fn font_names_read_as_families() {
+    use super::font::family_and_style;
+    assert_eq!(family_and_style("ArialMT").0, "Arial");
+    assert_eq!(family_and_style("TimesNewRomanPS-BoldItalicMT"), ("Times New Roman".to_string(), true, true));
+    assert_eq!(family_and_style("MinionPro-Regular").0, "Minion Pro");
+    assert_eq!(family_and_style("HelveticaNeueLTStd-Roman").0, "Helvetica Neue LT Std");
+    assert_eq!(family_and_style("SourceSans3-Bold"), ("Source Sans 3".to_string(), true, false));
+    assert_eq!(family_and_style("PTSans-Italic"), ("PT Sans".to_string(), false, true));
 }

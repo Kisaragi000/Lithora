@@ -102,6 +102,7 @@ export function PrintDialog({
   currentPage,
   onClose,
   onDone,
+  print,
 }: {
   t: Strings;
   docId: number;
@@ -109,6 +110,8 @@ export function PrintDialog({
   currentPage: number;
   onClose(): void;
   onDone(message: string, error?: boolean): void;
+  /** Print with these options another way (a PDF tab), instead of the document engine. */
+  print?: (options: PrintOptions) => Promise<unknown>;
 }) {
   const [printers, setPrinters] = useState<Printer[] | null>(null);
   const [opts, setOpts] = useState<PrintOptions>({
@@ -137,7 +140,7 @@ export function PrintDialog({
   const go = async () => {
     setBusy(true);
     try {
-      await engine.print(docId, opts);
+      await (print ? print(opts) : engine.print(docId, opts));
       onDone(t.sentToPrinter);
       onClose();
     } catch (e) {

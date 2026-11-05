@@ -135,7 +135,7 @@ fn load(bytes: Vec<u8>, password: Option<&str>) -> Result<(Document, Arc<Vec<u8>
 fn open_bytes(name: String, path: Option<PathBuf>, bytes: Vec<u8>, password: Option<String>) -> Result<PdfDoc, String> {
     let original = Arc::new(bytes.clone());
     let (doc, base, encrypted) = load(bytes, password.as_deref())?;
-    let pdf = hayro::hayro_syntax::Pdf::new(base.as_ref().clone()).map_err(|e| format!("this PDF couldn't be read ({e:?})"))?;
+    let pdf = hayro::hayro_syntax::Pdf::new(base.clone()).map_err(|e| format!("this PDF couldn't be read ({e:?})"))?;
     let geometry = render::geometry(&pdf);
     let pages: Vec<ObjectId> = doc.page_iter().collect();
     if pages.len() != geometry.len() || pages.is_empty() {
@@ -443,17 +443,13 @@ fn page_items(d: &mut PdfDoc, page: usize) -> Result<PageItems, String> {
     for (i, line) in model.lines.iter().enumerate() {
         let key = TextKey::Line(i);
         match d.edits.texts.get(&(page, key)) {
-            Some(te) => {
-                if te.chars.is_empty() {
-                    continue;
-                }
-                texts.push(text_item(d, page, key, te, true, locked.is_some()));
-            }
+            // An emptied line stays listed (with no width), so it can be typed in again.
+            Some(te) => texts.push(text_item(d, page, key, te, true, locked.is_some())),
             None => texts.push(text_item(d, page, key, &TextEdit::from_line(line), false, locked.is_some())),
         }
     }
     for ((p, key), te) in &d.edits.texts {
-        if *p == page && matches!(key, TextKey::New(_)) && !te.chars.is_empty() {
+        if *p == page && matches!(key, TextKey::New(_)) {
             texts.push(text_item(d, page, *key, te, true, locked.is_some()));
         }
     }
@@ -501,10 +497,7 @@ fn font_reports(d: &PdfDoc) -> Vec<font::FontReport> {
         let installed = font::installed_family(f).is_some();
         let (replacement, replaced) = match d.repl.get(&k) {
             Some(r) => (r.clone(), true),
-            None => {
-                let r = wordcraft_fonts::word::resolve(&f.family, f.bold, f.italic);
-                (r.face.get().family.clone(), false)
-            }
+            None => (font::substitute_family(f), false),
         };
         // One entry per font name: subsets of one font on several pages are one font.
         if let Some(o) = out.iter_mut().find(|o| o.name == f.display_name()) {
@@ -580,10 +573,19 @@ pub fn pdf_state(state: State<PdfState>, doc: u32) -> Result<PdfInfo, String> {
 #[tauri::command(async)]
 pub fn pdf_render_page(state: State<PdfState>, doc: u32, page: usize, scale: f64, rect: Option<[f64; 4]>) -> Result<tauri::ipc::Response, String> {
     let (bytes, repl) = with(&state, doc, |d| {
-        let repl: HashMap<String, String> = d.repl.iter().map(|(k, v)| (d.fonts.list[*k].ps_name.to_ascii_lowercase(), v.clone())).collect();
+        // The font each font the PDF doesn't hold is drawn in: the user's choice, else the same
+        // stand-in the Fonts panel names and new letters are typed in.
+        let mut repl: HashMap<String, String> = d
+            .fonts
+            .list
+            .iter()
+            .filter(|f| f.embedded == font::Embedded::No && !f.builtin && f.kind != font::Kind::Type3)
+            .map(|f| (f.ps_name.to_ascii_lowercase(), font::substitute_family(f)))
+            .collect();
+        repl.extend(d.repl.iter().map(|(k, v)| (d.fonts.list[*k].ps_name.to_ascii_lowercase(), v.clone())));
         Ok((d.current()?, repl))
     })?;
-    let pdf = hayro::hayro_syntax::Pdf::new(bytes.as_ref().clone()).map_err(|e| format!("couldn't draw the page ({e:?})"))?;
+    let pdf = hayro::hayro_syntax::Pdf::new(bytes).map_err(|e| format!("couldn't draw the page ({e:?})"))?;
     let (w, h, x, y, px) = render::draw(&pdf, page, scale.clamp(0.05, 12.0), rect, &render::settings(repl))?;
     let mut out = Vec::with_capacity(16 + px.len());
     for v in [w, h, x, y] {
@@ -875,8 +877,8 @@ pub fn pdf_redo(state: State<PdfState>, doc: u32) -> Result<UndoReply, String> {
     })
 }
 
-/// Save the PDF, over its file or to `path`. The saved file is opened again in the tab, so
-/// what the tab shows is the file on disk.
+/// Save the PDF, over its file or to `path`. The edits stay as they are (and can still be
+/// undone): each save writes the opened file with all of them added.
 #[tauri::command(async)]
 pub fn pdf_save(state: State<PdfState>, doc: u32, path: Option<String>) -> Result<PdfInfo, String> {
     let mut docs = state.lock()?;
@@ -887,25 +889,20 @@ pub fn pdf_save(state: State<PdfState>, doc: u32, path: Option<String>) -> Resul
     };
     let bytes = d.file_bytes()?;
     // Read it back first: a file that doesn't open again isn't written over the original.
-    let repl = d.repl.clone();
-    let password = d.password.clone();
-    let mut fresh = open_bytes(base_name(&target), Some(target.clone()), bytes.clone(), password).map_err(|e| format!("the edited PDF didn't come out right, so it wasn't saved ({e})"))?;
+    let mut check = open_bytes(base_name(&target), Some(target.clone()), bytes.clone(), d.password.clone())
+        .map_err(|e| format!("the edited PDF didn't come out right, so it wasn't saved ({e})"))?;
+    for p in 0..check.pages.len().min(3) {
+        check.model(p).map_err(|e| format!("the edited PDF didn't come out right, so it wasn't saved ({e})"))?;
+    }
     let tmp = target.with_extension("pdf.lithora-tmp");
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &target).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
     })?;
-    // Replacements stay with fonts of the same name.
-    for (k, fam) in repl {
-        let name = d.fonts.list[k].display_name();
-        for (j, f) in fresh.fonts.list.iter().enumerate() {
-            if f.display_name() == name {
-                fresh.repl.insert(j, fam.clone());
-            }
-        }
-    }
-    *d = fresh;
+    d.saved = d.edits.clone();
+    d.name = base_name(&target);
+    d.path = Some(target);
     Ok(info(doc, d))
 }
 
@@ -936,21 +933,24 @@ pub fn pdf_replace_font(state: State<PdfState>, doc: u32, key: usize, family: Op
     })
 }
 
-/// Print the PDF as it is now (with the edits).
+/// Print the PDF as it is now (with the edits): all of it, or the pages chosen.
 #[tauri::command]
-pub async fn pdf_print(state: State<'_, PdfState>, doc: u32, printer: Option<String>, copies: u32) -> Result<String, String> {
-    let (bytes, title) = with(&state, doc, |d| Ok((d.current()?, d.name.clone())))?;
-    let job = craft_print::Job {
-        printer: printer.filter(|p| !p.is_empty()),
-        copies: copies.clamp(1, 999),
-        collate: true,
-        duplex: None,
-        scaling: craft_print::Scaling::ShrinkToFit,
-        grayscale: false,
-        title,
-        options: Vec::new(),
-    };
-    tauri::async_runtime::spawn_blocking(move || craft_print::submit(&bytes, &job).map_err(|e| e.to_string())).await.map_err(|e| e.to_string())?
+pub async fn pdf_print(state: State<'_, PdfState>, doc: u32, options: crate::print::PrintOptions) -> Result<String, String> {
+    let (bytes, title, count) = with(&state, doc, |d| Ok((d.current()?, d.name.clone(), d.pages.len())))?;
+    let pages = options.pages(count)?;
+    let pdf = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let Some(keep) = pages else { return Ok(bytes.as_ref().clone()) };
+        // Only those pages: the others are taken out of a copy.
+        let mut copy = Document::load_mem(&bytes).map_err(|e| e.to_string())?;
+        let drop: Vec<u32> = (1..=count as u32).filter(|p| !keep.contains(&(*p as usize - 1))).collect();
+        copy.delete_pages(&drop);
+        let mut out = Vec::new();
+        copy.save_to(&mut out).map_err(|e| e.to_string())?;
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    crate::print::submit(pdf, crate::print::job(options, title)).await
 }
 
 /// Add a font file to Lithora (kept for next time too). Returns the families it holds.

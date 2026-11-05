@@ -12,7 +12,7 @@
 
 use super::edit::{self, Edits, Placed, Replacements, Src, TextKey};
 use super::font::{PdfFont, code_bytes, deref};
-use super::read::{self, Fonts, Mat, PageModel, Unit, apply, invert, mul};
+use super::read::{self, Fonts, Mat, PageModel, Unit, invert, mul};
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -692,10 +692,4 @@ pub fn append(base: &[u8], trailer: &Dictionary, objects: &[(ObjectId, Object)],
     }
     out.extend_from_slice(format!("\nstartxref\n{xref_at}\n%%EOF\n").as_bytes());
     Ok(out)
-}
-
-/// Where a point of the page is drawn on screen: `display` maps page space to the view
-/// (points, y down), from the renderer.
-pub fn to_view(display: &Mat, x: f64, y: f64) -> (f64, f64) {
-    apply(display, x, y)
 }

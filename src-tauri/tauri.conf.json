@@ -89,6 +89,15 @@
     "fileAssociations": [
       {
         "ext": [
+          "pdf"
+        ],
+        "name": "PDF Document",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      },
+      {
+        "ext": [
           "docx"
         ],
         "name": "Word Document",

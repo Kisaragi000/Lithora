@@ -154,12 +154,6 @@ impl Line {
     pub fn x0(&self) -> f64 {
         self.chars.first().map(|c| c.x0).unwrap_or(0.0)
     }
-    pub fn x1(&self) -> f64 {
-        self.chars.last().map(|c| c.x1).unwrap_or(0.0)
-    }
-    pub fn size(&self) -> f64 {
-        self.styles.iter().map(|s| s.size).fold(0.0, f64::max)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -343,7 +337,6 @@ struct Block {
 struct Reader<'a> {
     doc: &'a Document,
     fonts: &'a mut Fonts,
-    page_index: usize,
     drawn: Vec<Drawn>,
     graphics: Vec<(Graphic, Vec<usize>)>,
     units: HashMap<Unit, UnitOps>,
@@ -356,7 +349,7 @@ pub fn read_page(doc: &Document, fonts: &mut Fonts, page_index: usize, page: Obj
     fonts.scan_page(doc, page_index, &res);
     let content = doc.get_page_content(page);
     let unit = decode(&content);
-    let mut r = Reader { doc, fonts, page_index, drawn: Vec::new(), graphics: Vec::new(), units: HashMap::new(), depth: 0 };
+    let mut r = Reader { doc, fonts, drawn: Vec::new(), graphics: Vec::new(), units: HashMap::new(), depth: 0 };
     let state = GState {
         ctm: IDENTITY,
         fill: Color::BLACK,

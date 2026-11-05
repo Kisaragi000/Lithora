@@ -76,7 +76,12 @@ pub async fn engine_print(state: State<'_, EngineState>, doc: u32, options: Prin
     let pdf = std::fs::read(&file).map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&file);
     let pdf = pdf?;
-    let job = craft_print::Job {
+    submit(pdf, job(options, title)).await
+}
+
+/// The print job for these options.
+pub fn job(options: PrintOptions, title: String) -> craft_print::Job {
+    craft_print::Job {
         printer: options.printer.filter(|p| !p.is_empty()),
         copies: options.copies.clamp(1, 999),
         collate: options.collate,
@@ -90,8 +95,50 @@ pub async fn engine_print(state: State<'_, EngineState>, doc: u32, options: Prin
         grayscale: options.grayscale,
         title,
         options: Vec::new(),
-    };
+    }
+}
+
+/// Send a PDF to the printer. Returns the spooler's message.
+pub async fn submit(pdf: Vec<u8>, job: craft_print::Job) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || craft_print::submit(&pdf, &job).map_err(|e| e.to_string()))
         .await
         .map_err(|e| e.to_string())?
+}
+
+impl PrintOptions {
+    /// The pages to print (0-based, in order), of `count`; None for all of them.
+    pub fn pages(&self, count: usize) -> Result<Option<Vec<usize>>, String> {
+        match self.range.as_str() {
+            "current" => Ok(Some(vec![self.current_page.unwrap_or(0).min(count.saturating_sub(1))])),
+            "custom" => {
+                let text = self.pages.as_deref().unwrap_or("").trim();
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                let mut out = Vec::new();
+                for part in text.split([',', ';']).map(str::trim).filter(|p| !p.is_empty()) {
+                    let bad = || format!("“{part}” isn't a page or a range of pages");
+                    let (a, b) = match part.split_once('-') {
+                        Some((a, b)) => {
+                            let a: usize = if a.trim().is_empty() { 1 } else { a.trim().parse().map_err(|_| bad())? };
+                            let b: usize = if b.trim().is_empty() { count } else { b.trim().parse().map_err(|_| bad())? };
+                            (a, b)
+                        }
+                        None => {
+                            let n: usize = part.parse().map_err(|_| bad())?;
+                            (n, n)
+                        }
+                    };
+                    for p in a.max(1)..=b.min(count) {
+                        out.push(p - 1);
+                    }
+                }
+                if out.is_empty() {
+                    return Err("those pages aren't in the document".into());
+                }
+                Ok(Some(out))
+            }
+            _ => Ok(None),
+        }
+    }
 }

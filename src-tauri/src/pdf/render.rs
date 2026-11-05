@@ -56,12 +56,9 @@ pub fn settings(replacements: HashMap<String, String>) -> InterpreterSettings {
                 }
                 let (family, bold, italic) = super::font::family_and_style(base);
                 let family = f.font_family.clone().unwrap_or(family);
-                let db = wordcraft_fonts::FontDb::global();
-                if db.has_family(&family) || db.has_family(base) {
-                    let fam = if db.has_family(&family) { family } else { base.to_string() };
-                    Some(face_data(&fam, f.is_bold || bold, f.is_italic || italic))
-                } else {
-                    Some(f.pick_standard_font().get_font_data())
+                match super::font::installed_as(&family, base) {
+                    Some(fam) => Some(face_data(&fam, f.is_bold || bold, f.is_italic || italic)),
+                    None => Some(f.pick_standard_font().get_font_data()),
                 }
             }
         }),
